@@ -26,6 +26,13 @@ public:
 
   const double &operator[](const int i) const { return data[i]; }
 
+  Vec<n> operator+=(const Vec<n> &other) {
+    for (int i = 0; i < n; i++) {
+      (*this)[i] += other[i];
+    }
+    return *this;
+  }
+
   Vec<n> operator*(const double a) const {
     Vec<n> res;
 
@@ -36,7 +43,7 @@ public:
     return res;
   }
 
-  double operator*(const Vec<n> &other) {
+  double operator*(const Vec<n> &other) const {
     double res = .0;
 
     for (int i = 0; i < n; i++) {

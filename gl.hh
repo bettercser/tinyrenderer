@@ -5,6 +5,7 @@
 #include "Vector.hh"
 #include "matrix.hh"
 #include "tgaimage.h"
+#include "render/shader.hpp"
 
 extern Matrix<4> ModelView, Viewport, Perspective;
 extern Matrix<4> LightView, LightViewport, LightPerspective, LightMVP;
@@ -20,15 +21,4 @@ void init_viewport(int x, int y, int w, int h);
 
 void init_zbuffer(const int width, const int height);
 
-struct IShader {
-
-  virtual std::pair<bool, TGAColor> fragment(const Vec<3> &bar) const = 0;
-  double varying_w_recip[3];
-  Matrix<3> TBN;
-};
-
-typedef Vec<4> Triangle[3];
-Vec<3> barycentric(const Triangle &tri, const Vec<3> &P);
-
-void rasterize(const Triangle &tri, IShader &shader, TGAImage &framebuffer);
 #endif // GL_HH
