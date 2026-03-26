@@ -1,4 +1,5 @@
 #include "tracer.hpp"
+#include "material.hpp"
 
 namespace {
 // 定义辅助函数 处理 阴影
@@ -26,6 +27,39 @@ Vec<3> random_in_unit_sphere() {
 }
 
 Vec<3> random_unit_vector() { return random_in_unit_sphere().normalized(); }
+
+bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
+                        Vec<3> &attenuation) {
+
+  Vec<3> scatter_dir = rec.normal + random_unit_vector();
+
+  if (scatter_dir * scatter_dir < 1e-8) {
+    scatter_dir = rec.normal;
+  }
+
+  scattered = Ray(rec.point + rec.normal * 1e-4, scatter_dir);
+  attenuation = rec.material ? rec.material->albedo : Vec<3>{1.0, 1.0, 1.0};
+  return true;
+}
+
+bool scatter_material(const HitRecord &rec, Ray &scattered,
+                      Vec<3> &attenuation) {
+
+  if (!rec.material) {
+    attenuation = Vec<3>{1.0, 1.0, 1.0};
+    scattered = Ray(rec.point + rec.normal * 1e-4, rec.normal);
+    return true;
+  }
+
+  switch (rec.material->type) {
+
+  case MaterialType::Lambertian:
+    return scatter_lambertian(rec, scattered, attenuation);
+  }
+
+  return false;
+}
+
 } // namespace
 
 Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth) {
@@ -35,20 +69,16 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth) {
   }
   HitRecord rec;
   if (scene.hit(ray, 0.001, std::numeric_limits<double>::max(), rec)) {
-    Vec<3> scatter_dir = rec.normal + random_unit_vector();
+    Ray scattered{{0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
+    Vec<3> attenuation{1.0, 1.0, 1.0};
 
-    if (scatter_dir * scatter_dir < 1e-8) {
-      scatter_dir = rec.normal; // 避免散射方向过于接近零向量
+    if (scatter_material(rec, scattered, attenuation)) {
+      Vec<3> bounced = trace_ray(scattered, scene, depth - 1);
+
+      return Vec<3>{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
+                    attenuation[2] * bounced[2]};
     }
-
-    Ray scattered(rec.point, scatter_dir);
-    Vec<3> attenuation =
-        rec.material ? rec.material->albedo : Vec<3>{1.0, 1.0, 1.0};
-
-    Vec<3> bounced = trace_ray(scattered, scene, depth - 1);
-
-    return Vec<3>{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
-                  attenuation[2] * bounced[2]};
+    return Vec<3>{0.0, 0.0, 0.0}; // 材质散射失败，返回黑色
   }
   Vec<3> unit_dir = ray.direction.normalized();
   double t = 0.5 * (unit_dir[1] + 1.0);
