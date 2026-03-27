@@ -52,6 +52,7 @@ render/tracer.hpp
 render/tracer.cpp
 scene/scene.cpp
 render/tracer_config.hpp
+render/light.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

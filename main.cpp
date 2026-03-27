@@ -5,6 +5,7 @@
 #include "render/material.hpp"
 #include "render/rasterizer.hpp"
 #include "render/renderer.hpp"
+#include "render/sample.hpp"
 #include "render/shader.hpp"
 #include "render/shaders/depth_shader.hpp"
 #include "render/shaders/phong_shader.hpp"
@@ -92,8 +93,6 @@ Matrix<4> create_light_viewport_matrix(const int size) {
 
   return LightViewport;
 }
-
-double random_double() { return rand() / (RAND_MAX + 1.0); }
 
 int main(int argc, char **argv) {
   TGAImage framebuffer(width, height, TGAImage::RGB);
@@ -274,23 +273,32 @@ int main(int argc, char **argv) {
   scene.spheres.push_back(ground);
   scene.spheres.push_back(glass_sphere);
   TracerConfig tracer_config;
-  Vec<3> light_direction = Vec<3>{-1.0, -1.0, 1.0}.normalized();
+  DirectionalLight light;
+  light.direction = Vec<3>{1.0, -1.0, -1.0}.normalized();
+  light.color = Vec<3>{1.0, 1.0, 1.0};
+  light.intensity = 1.5;
 
   for (int y = 0; y < ray_height; y++) {
     for (int x = 0; x < ray_width; x++) {
 
-      Vec<3> accumalate_color{0.0, 0.0, 0.0};
+      Vec<3> accumulated_color{0.0, 0.0, 0.0};
 
-      for (int s = 0; s < tracer_config.samples_per_pixel; s++) {
+      int samples_per_side =
+          static_cast<int>(std::sqrt(tracer_config.samples_per_pixel));
+      for (int sy = 0; sy < samples_per_side; sy++) {
 
-        double u = (x + random_double()) / static_cast<double>(ray_width);
-        double v = (y + random_double()) / static_cast<double>(ray_height);
-        Ray ray = ray_camera.generate_ray(u, v);
+        for (int sx = 0; sx < samples_per_side; sx++) {
 
-        accumalate_color +=
-            trace_ray(ray, scene, tracer_config.max_depth, tracer_config);
+          Vec<2> uv = sample_pixel_uv(x, y, ray_width, ray_height, sx, sy,
+                                      samples_per_side, samples_per_side);
+
+          Ray ray = ray_camera.generate_ray(uv[0], uv[1]);
+
+          accumulated_color += trace_ray(ray, scene, tracer_config.max_depth,
+                                         light, tracer_config);
+        }
       }
-      Vec<3> ray_color = accumalate_color /
+      Vec<3> ray_color = accumulated_color /
                          static_cast<double>(tracer_config.samples_per_pixel);
 
       ray_color[0] = std::sqrt(std::max(0.0, ray_color[0]));

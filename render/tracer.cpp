@@ -1,8 +1,42 @@
 #include "tracer.hpp"
 #include "hit_record.hpp"
 #include "material.hpp"
+#include "utils/render_util.hpp"
 
 namespace {
+
+bool is_in_shadow(const Scene &scene, const Vec<3> &point, const Vec<3> &normal,
+                  const Vec<3> &light_dir, const TracerConfig &config) {
+  Ray shadow_ray(point + normal * config.ray_epsilon, light_dir);
+  HitRecord temp_rec;
+  return scene.hit(shadow_ray, 0.001, std::numeric_limits<double>::max(),
+                   temp_rec);
+}
+
+Vec<3> evaluating_direct_lighting(const Scene &scene, const HitRecord &rec,
+                                  const DirectionalLight &light,
+                                  const TracerConfig &config) {
+
+  if (!rec.material || rec.material->type != MaterialType::Lambertian) {
+    return Vec<3>{0.0, 0.0, 0.0};
+  }
+  Vec<3> light_dir = (-light.direction).normalized();
+
+  if (is_in_shadow(scene, rec.point, rec.normal, light_dir, config)) {
+    return Vec<3>{0.0, 0.0, 0.0}; // 在阴影中，返回黑色
+  }
+
+  double n_dot_l = std::max(0.0, rec.normal * light_dir);
+  if (n_dot_l <= 0.0) {
+    return Vec<3>{0.0, 0.0, 0.0}; // 法线背向光源，返回黑色
+  }
+
+  Vec<3> base_color = rec.material->albedo;
+
+  return Vec<3>{base_color[0] * light.color[0], base_color[1] * light.color[1],
+                base_color[2] * light.color[2]} *
+         (light.intensity * n_dot_l);
+}
 
 Vec<3> sky_color(const Ray &ray) {
   Vec<3> unit_dir = ray.direction.normalized();
@@ -10,8 +44,6 @@ Vec<3> sky_color(const Ray &ray) {
   return Vec<3>{1.0, 1.0, 1.0} * (1.0 - t) +
          Vec<3>{0.5, 0.7, 1.0} * t; // 线性插值背景色
 }
-
-double random_double() { return rand() / (RAND_MAX + 1.0); }
 
 // 此函数用于计算 折射光线的方向
 // 通过叠加折射光在垂直于法线方向平面内的分量与折射光沿法线方向的分量
@@ -133,7 +165,7 @@ bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
 } // namespace
 
 Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
-                 const TracerConfig &config) {
+                 const DirectionalLight &light, const TracerConfig &config) {
 
   if (depth <= 0) {
     return Vec<3>{0.0, 0.0, 0.0}; // 超过递归深度，返回黑色
@@ -142,28 +174,33 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
   if (scene.hit(ray, 0.001, std::numeric_limits<double>::max(), rec)) {
     Ray scattered{{0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
     Vec<3> attenuation{1.0, 1.0, 1.0};
-
-    // 在达到一定深度后，使用 Russian Roulette 技术随机终止路径，以减少计算量
-    // 无偏估计
-    if (depth <= config.max_depth - config.rr_start_depth) {
-      double survive_prob =
-          std::max(attenuation[0], std::max(attenuation[1], attenuation[2]));
-      survive_prob = std::clamp(survive_prob, 0.10, 0.95);
-
-      if (random_double() > survive_prob) {
-        return Vec<3>{0.0, 0.0, 0.0}; // Russian Roulette 终止路径
-      }
-
-      attenuation = attenuation / survive_prob; // 反向补偿
+    Vec<3> direct{0.0, 0.0, 0.0};
+    if (config.enable_direct_lighting) {
+      direct = evaluating_direct_lighting(scene, rec, light, config);
     }
 
     if (scatter_material(ray, rec, scattered, attenuation, config)) {
-      Vec<3> bounced = trace_ray(scattered, scene, depth - 1, config);
+      // 在达到一定深度后，使用 Russian Roulette
+      // 技术随机终止路径，以减少计算量 无偏估计
+      if (depth <= config.max_depth - config.rr_start_depth) {
+        double survive_prob =
+            std::max(attenuation[0], std::max(attenuation[1], attenuation[2]));
+        survive_prob = std::clamp(survive_prob, 0.10, 0.95);
 
-      return Vec<3>{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
-                    attenuation[2] * bounced[2]};
+        if (random_double() > survive_prob) {
+          return Vec<3>{0.0, 0.0, 0.0}; // Russian Roulette 终止路径
+        }
+
+        attenuation = attenuation / survive_prob; // 反向补偿
+      }
+      Vec<3> bounced = trace_ray(scattered, scene, depth - 1, light, config);
+
+      Vec<3> indirect{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
+                      attenuation[2] * bounced[2]};
+
+      return indirect + direct;
     }
-    return Vec<3>{0.0, 0.0, 0.0}; // 材质散射失败，返回黑色
+    return direct;
   }
 
   return sky_color(ray); // 没有击中任何物体，返回背景色
