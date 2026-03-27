@@ -33,3 +33,8 @@ bool Sphere::hit(const Ray &ray, double t_min, double t_max,
 
   return true;
 }
+
+AABB Sphere::bounding_box() const {
+  Vec<3> radius_vec{radius, radius, radius};
+  return AABB{center - radius_vec, center + radius_vec};
+}

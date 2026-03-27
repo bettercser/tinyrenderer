@@ -17,12 +17,14 @@
 #include "render/utils/render_util.hpp"
 #include "scene/camera.hpp"
 #include "scene/scene.hpp"
+#include "scene/sphere.hpp"
 #include "tgaimage.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <memory>
 #include <vector>
 
 constexpr int width = 1024;
@@ -267,11 +269,11 @@ int main(int argc, char **argv) {
   glass_sphere.radius = 0.5;
   glass_sphere.material = &glass_mat;
 
-  scene.spheres.push_back(sphere1);
-  scene.spheres.push_back(sphere2);
-  scene.spheres.push_back(sphere3);
-  scene.spheres.push_back(ground);
-  scene.spheres.push_back(glass_sphere);
+  scene.objects.push_back(std::make_shared<Sphere>(sphere1));
+  scene.objects.push_back(std::make_shared<Sphere>(sphere2));
+  scene.objects.push_back(std::make_shared<Sphere>(sphere3));
+  scene.objects.push_back(std::make_shared<Sphere>(ground));
+  scene.objects.push_back(std::make_shared<Sphere>(glass_sphere));
   TracerConfig tracer_config;
   DirectionalLight light;
   light.direction = Vec<3>{1.0, -1.0, -1.0}.normalized();
