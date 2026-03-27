@@ -26,6 +26,15 @@ public:
 
   const double &operator[](const int i) const { return data[i]; }
 
+  Vec<n> operator-() const {
+    Vec<n> result;
+
+    for (int i = 0; i < n; i++) {
+      result[i] = -(*this)[i];
+    }
+    return result;
+  }
+
   Vec<n> operator+=(const Vec<n> &other) {
     for (int i = 0; i < n; i++) {
       (*this)[i] += other[i];

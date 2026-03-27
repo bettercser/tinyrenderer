@@ -5,6 +5,7 @@
 enum class MaterialType {
   Lambertian,
   Metal,
+  Dielectric,
 };
 
 struct Material {
@@ -15,4 +16,5 @@ struct Material {
 
   double metallic = 0.0;  // 金属度
   double roughness = 0.5; // 粗糙度
+  double ior = 1.5;       // 折射率（仅对Dielectric有效）
 };

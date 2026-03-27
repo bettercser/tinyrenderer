@@ -1,4 +1,5 @@
 #include "tracer.hpp"
+#include "hit_record.hpp"
 #include "material.hpp"
 
 namespace {
@@ -7,6 +8,27 @@ namespace {
 // 为了防止自遮挡需要加一点偏移
 
 double random_double() { return rand() / (RAND_MAX + 1.0); }
+
+// 此函数用于计算 折射光线的方向
+// 通过叠加折射光在垂直于法线方向平面内的分量与折射光沿法线方向的分量
+Vec<3> refract(const Vec<3> &uv, const Vec<3> &n, double etai_over_etat) {
+
+  double cos_theta = std::min(-uv * n, 1.0);
+
+  Vec<3> r_out_perp = (uv + n * cos_theta) * etai_over_etat;
+  Vec<3> r_out_parallel =
+      n * -std::sqrt(std::abs(1.0 - r_out_perp * r_out_perp));
+
+  return r_out_perp + r_out_parallel;
+}
+
+// 此函数用于计算 在某个角度下光线被反射的概率
+// 通过 Schlick 近似计算
+double reflectance(double cosine, double ref_idx) {
+  double r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
+  r0 = r0 * r0;
+  return r0 + (1.0 - r0) * std::pow((1.0 - cosine), 5);
+}
 
 Vec<3> random_in_unit_sphere() {
   Vec<3> p;
@@ -53,6 +75,33 @@ bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
   return true;
 }
 
+bool scatter_dielectric(const HitRecord &rec, const Ray &incoming,
+                        Ray &scattered, Vec<3> &attenuation) {
+  attenuation = Vec<3>{1.0, 1.0, 1.0};
+
+  double refraction_ratio =
+      rec.front_face ? (1.0 / rec.material->ior) : rec.material->ior;
+
+  Vec<3> unit_dir = incoming.direction.normalized();
+
+  double cos_theta = std::min(-unit_dir * rec.normal, 1.0);
+  double sin_theta = std::sqrt(1.0 - cos_theta * cos_theta);
+
+  bool cannot_refract = refraction_ratio * sin_theta > 1.0;
+
+  Vec<3> direction;
+
+  if (cannot_refract ||
+      reflectance(cos_theta, refraction_ratio) > random_double()) {
+    direction = reflect(unit_dir, rec.normal);
+  } else {
+    direction = refract(unit_dir, rec.normal, refraction_ratio);
+  }
+
+  scattered = Ray(rec.point + direction * 1e-4, direction);
+  return true;
+}
+
 bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
                       Vec<3> &attenuation) {
 
@@ -69,6 +118,8 @@ bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
 
   case MaterialType::Metal:
     return scatter_metal(rec, incoming, scattered, attenuation);
+  case MaterialType::Dielectric:
+    return scatter_dielectric(rec, incoming, scattered, attenuation);
   }
 
   return false;

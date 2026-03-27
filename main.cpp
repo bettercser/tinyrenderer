@@ -242,8 +242,12 @@ int main(int argc, char **argv) {
   Material ground_mat;
   ground_mat.albedo = Vec<3>{0.8, 0.8, 0.75};
 
+  Material glass_mat;
+  glass_mat.type = MaterialType::Dielectric;
+  glass_mat.ior = 1.5;
+
   Sphere sphere1;
-  sphere1.center = Vec<3>{0.0, 0.5, -3.0};
+  sphere1.center = Vec<3>{0.1, 0.5, -3.0};
   sphere1.radius = 1.0;
   sphere1.material = &red_mat;
 
@@ -262,10 +266,16 @@ int main(int argc, char **argv) {
   ground.radius = 100.0;
   ground.material = &ground_mat;
 
+  Sphere glass_sphere;
+  glass_sphere.center = Vec<3>{0.9, 0.15, -2.2};
+  glass_sphere.radius = 0.5;
+  glass_sphere.material = &glass_mat;
+
   scene.spheres.push_back(sphere1);
   scene.spheres.push_back(sphere2);
   scene.spheres.push_back(sphere3);
   scene.spheres.push_back(ground);
+  scene.spheres.push_back(glass_sphere);
   Vec<3> light_direction = Vec<3>{-1.0, -1.0, 1.0}.normalized();
 
   for (int y = 0; y < ray_height; y++) {
