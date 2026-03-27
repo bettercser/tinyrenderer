@@ -235,7 +235,9 @@ int main(int argc, char **argv) {
   green_mat.albedo = Vec<3>{0.2, 1.0, 0.2};
 
   Material blue_mat;
-  blue_mat.albedo = Vec<3>{0.2, 0.2, 1.0};
+  blue_mat.type = MaterialType::Metal;
+  blue_mat.albedo = Vec<3>{0.8, 0.85, 1.0};
+  blue_mat.roughness = 0.05;
 
   Material ground_mat;
   ground_mat.albedo = Vec<3>{0.8, 0.8, 0.75};
@@ -269,7 +271,7 @@ int main(int argc, char **argv) {
   for (int y = 0; y < ray_height; y++) {
     for (int x = 0; x < ray_width; x++) {
 
-      constexpr int sample_per_pixel = 32;
+      constexpr int sample_per_pixel = 128;
       Vec<3> accumalate_color{0.0, 0.0, 0.0};
 
       for (int s = 0; s < sample_per_pixel; s++) {
@@ -299,7 +301,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  ray_image.write_tga_file("ray_traced_sphere_spp32.tga");
+  ray_image.write_tga_file("ray_traced_sphere_spp128.tga");
 
   // Model eye_outer_model("../obj/african_head/african_head_eye_outer.obj");
   // TextureShader eye_outer_shader(light_dir, eye_model);

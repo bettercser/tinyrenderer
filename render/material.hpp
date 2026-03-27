@@ -4,6 +4,7 @@
 
 enum class MaterialType {
   Lambertian,
+  Metal,
 };
 
 struct Material {

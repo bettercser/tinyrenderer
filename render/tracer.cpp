@@ -6,15 +6,6 @@ namespace {
 // 从被击中的点出发朝光源发射一条射线，检查是否有物体阻挡了光线
 // 为了防止自遮挡需要加一点偏移
 
-bool is_in_shadow(const Scene &scene, const Vec<3> &point,
-                  const Vec<3> &light_dir, const Vec<3> &normal) {
-  Ray shadow_ray(point + normal * 1e-4, light_dir);
-  HitRecord shadow_rec;
-
-  return scene.hit(shadow_ray, 0.001, std::numeric_limits<double>::max(),
-                   shadow_rec);
-}
-
 double random_double() { return rand() / (RAND_MAX + 1.0); }
 
 Vec<3> random_in_unit_sphere() {
@@ -28,6 +19,9 @@ Vec<3> random_in_unit_sphere() {
 
 Vec<3> random_unit_vector() { return random_in_unit_sphere().normalized(); }
 
+Vec<3> reflect(const Vec<3> &v, const Vec<3> &n) {
+  return v - n * (2.0 * (v * n));
+}
 bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
                         Vec<3> &attenuation) {
 
@@ -42,7 +36,24 @@ bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
   return true;
 }
 
-bool scatter_material(const HitRecord &rec, Ray &scattered,
+bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
+                   Vec<3> &attenuation) {
+  Vec<3> reflected = reflect(incoming.direction.normalized(), rec.normal);
+  double fuzz =
+      rec.material ? std::clamp(rec.material->roughness, 0.0, 1.0) : 0.0;
+
+  Vec<3> scattered_dir = reflected + random_in_unit_sphere() * fuzz;
+
+  if (scattered_dir * rec.normal <= 0) {
+    return false; // 散射方向与法线相反，丢弃
+  }
+
+  scattered = Ray(rec.point + rec.normal * 1e-4, scattered_dir);
+  attenuation = rec.material ? rec.material->albedo : Vec<3>{1.0, 1.0, 1.0};
+  return true;
+}
+
+bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
                       Vec<3> &attenuation) {
 
   if (!rec.material) {
@@ -55,6 +66,9 @@ bool scatter_material(const HitRecord &rec, Ray &scattered,
 
   case MaterialType::Lambertian:
     return scatter_lambertian(rec, scattered, attenuation);
+
+  case MaterialType::Metal:
+    return scatter_metal(rec, incoming, scattered, attenuation);
   }
 
   return false;
@@ -72,7 +86,7 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth) {
     Ray scattered{{0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
     Vec<3> attenuation{1.0, 1.0, 1.0};
 
-    if (scatter_material(rec, scattered, attenuation)) {
+    if (scatter_material(ray, rec, scattered, attenuation)) {
       Vec<3> bounced = trace_ray(scattered, scene, depth - 1);
 
       return Vec<3>{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
