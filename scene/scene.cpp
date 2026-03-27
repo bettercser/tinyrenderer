@@ -2,6 +2,10 @@
 
 bool Scene::hit(const Ray &ray, double t_min, double t_max,
                 HitRecord &rec) const {
+
+  if (accel) {
+    return accel->hit(ray, t_min, t_max, rec);
+  }
   HitRecord temp_rec;
   bool hit_anything = false;
   double closest_so_far = t_max;

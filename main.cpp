@@ -15,15 +15,18 @@
 #include "render/tracer.hpp"
 #include "render/tracer_config.hpp"
 #include "render/utils/render_util.hpp"
+#include "scene/bvh_node.hpp"
 #include "scene/camera.hpp"
 #include "scene/scene.hpp"
 #include "scene/sphere.hpp"
 #include "tgaimage.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -197,6 +200,7 @@ int main(int argc, char **argv) {
   // }
 
   Scene scene;
+
   // scene.models.push_back(&model);
   // scene.models.push_back(&eye_model);
   // Material skin_material;
@@ -279,47 +283,73 @@ int main(int argc, char **argv) {
   light.direction = Vec<3>{1.0, -1.0, -1.0}.normalized();
   light.color = Vec<3>{1.0, 1.0, 1.0};
   light.intensity = 1.5;
-
-  for (int y = 0; y < ray_height; y++) {
-    for (int x = 0; x < ray_width; x++) {
-
-      Vec<3> accumulated_color{0.0, 0.0, 0.0};
-
-      int samples_per_side =
-          static_cast<int>(std::sqrt(tracer_config.samples_per_pixel));
-      for (int sy = 0; sy < samples_per_side; sy++) {
-
-        for (int sx = 0; sx < samples_per_side; sx++) {
-
-          Vec<2> uv = sample_pixel_uv(x, y, ray_width, ray_height, sx, sy,
-                                      samples_per_side, samples_per_side);
-
-          Ray ray = ray_camera.generate_ray(uv[0], uv[1]);
-
-          accumulated_color += trace_ray(ray, scene, tracer_config.max_depth,
-                                         light, tracer_config);
-        }
-      }
-      Vec<3> ray_color = accumulated_color /
-                         static_cast<double>(tracer_config.samples_per_pixel);
-
-      ray_color[0] = std::sqrt(std::max(0.0, ray_color[0]));
-      ray_color[1] = std::sqrt(std::max(0.0, ray_color[1]));
-      ray_color[2] = std::sqrt(std::max(0.0, ray_color[2]));
-
-      TGAColor out_color{static_cast<unsigned char>(
-                             255.0 * std::clamp(ray_color[2], 0.0, 1.0)),
-                         static_cast<unsigned char>(
-                             255.0 * std::clamp(ray_color[1], 0.0, 1.0)),
-                         static_cast<unsigned char>(
-                             255.0 * std::clamp(ray_color[0], 0.0, 1.0)),
-                         255};
-
-      ray_image.set(x, ray_height - 1 - y, out_color);
-    }
+  if (scene.objects.empty()) {
+    std::cerr << "Scene has no hittable objects.\n";
+    return 1;
   }
 
-  ray_image.write_tga_file("ray_traced_sphere_spp128.tga");
+  int samples_per_side =
+      static_cast<int>(std::sqrt(tracer_config.samples_per_pixel));
+  if (samples_per_side * samples_per_side != tracer_config.samples_per_pixel) {
+    std::cerr << "samples_per_pixel must be a perfect square for stratified "
+                 "sampling.\n";
+    return 1;
+  }
+
+  auto bvh_root =
+      std::make_shared<BVHNode>(scene.objects, 0, scene.objects.size());
+
+  auto render_path_trace = [&](bool use_bvh,
+                               const char *output_name) -> double {
+    scene.accel = use_bvh ? bvh_root : nullptr;
+    std::srand(1234);
+
+    TGAImage image(ray_width, ray_height, TGAImage::RGB);
+    auto start = std::chrono::steady_clock::now();
+
+    for (int y = 0; y < ray_height; ++y) {
+      for (int x = 0; x < ray_width; ++x) {
+        Vec<3> accumulated_color{0.0, 0.0, 0.0};
+
+        for (int sy = 0; sy < samples_per_side; ++sy) {
+          for (int sx = 0; sx < samples_per_side; ++sx) {
+            Vec<2> uv = sample_pixel_uv(x, y, ray_width, ray_height, sx, sy,
+                                        samples_per_side, samples_per_side);
+
+            Ray ray = ray_camera.generate_ray(uv[0], uv[1]);
+            accumulated_color += trace_ray(ray, scene, tracer_config.max_depth,
+                                           light, tracer_config);
+          }
+        }
+
+        Vec<3> ray_color =
+            accumulated_color / static_cast<double>(tracer_config.samples_per_pixel);
+
+        ray_color[0] = std::sqrt(std::max(0.0, ray_color[0]));
+        ray_color[1] = std::sqrt(std::max(0.0, ray_color[1]));
+        ray_color[2] = std::sqrt(std::max(0.0, ray_color[2]));
+
+        TGAColor out_color{
+            static_cast<unsigned char>(255.0 * std::clamp(ray_color[2], 0.0, 1.0)),
+            static_cast<unsigned char>(255.0 * std::clamp(ray_color[1], 0.0, 1.0)),
+            static_cast<unsigned char>(255.0 * std::clamp(ray_color[0], 0.0, 1.0)),
+            255};
+
+        image.set(x, ray_height - 1 - y, out_color);
+      }
+    }
+
+    auto end = std::chrono::steady_clock::now();
+    image.write_tga_file(output_name);
+
+    return std::chrono::duration<double, std::milli>(end - start).count();
+  };
+
+  double linear_ms = render_path_trace(false, "ray_traced_linear.tga");
+  double bvh_ms = render_path_trace(true, "ray_traced_bvh.tga");
+
+  std::cout << "Path tracing (linear): " << linear_ms << " ms\n";
+  std::cout << "Path tracing (BVH):    " << bvh_ms << " ms\n";
 
   // Model eye_outer_model("../obj/african_head/african_head_eye_outer.obj");
   // TextureShader eye_outer_shader(light_dir, eye_model);

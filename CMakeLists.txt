@@ -48,6 +48,8 @@ render/ray.hpp
 scene/camera.cpp
 scene/sphere.hpp
 scene/sphere.cpp
+scene/bvh_node.hpp
+scene/bvh_node.cpp
 render/tracer.hpp
 render/tracer.cpp
 scene/scene.cpp
