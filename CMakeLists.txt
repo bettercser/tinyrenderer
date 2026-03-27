@@ -51,6 +51,7 @@ scene/sphere.cpp
 render/tracer.hpp
 render/tracer.cpp
 scene/scene.cpp
+render/tracer_config.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

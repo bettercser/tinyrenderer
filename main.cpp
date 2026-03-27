@@ -12,6 +12,7 @@
 #include "render/shaders/smooth_shader.hpp"
 #include "render/shaders/texture_shader.hpp"
 #include "render/tracer.hpp"
+#include "render/tracer_config.hpp"
 #include "render/utils/render_util.hpp"
 #include "scene/camera.hpp"
 #include "scene/scene.hpp"
@@ -21,10 +22,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
-#include <fstream>
-#include <iostream>
-#include <sstream>
-#include <utility>
 #include <vector>
 
 constexpr int width = 1024;
@@ -276,24 +273,25 @@ int main(int argc, char **argv) {
   scene.spheres.push_back(sphere3);
   scene.spheres.push_back(ground);
   scene.spheres.push_back(glass_sphere);
+  TracerConfig tracer_config;
   Vec<3> light_direction = Vec<3>{-1.0, -1.0, 1.0}.normalized();
 
   for (int y = 0; y < ray_height; y++) {
     for (int x = 0; x < ray_width; x++) {
 
-      constexpr int sample_per_pixel = 128;
       Vec<3> accumalate_color{0.0, 0.0, 0.0};
 
-      for (int s = 0; s < sample_per_pixel; s++) {
+      for (int s = 0; s < tracer_config.samples_per_pixel; s++) {
 
         double u = (x + random_double()) / static_cast<double>(ray_width);
         double v = (y + random_double()) / static_cast<double>(ray_height);
         Ray ray = ray_camera.generate_ray(u, v);
 
-        accumalate_color += trace_ray(ray, scene, 5);
+        accumalate_color +=
+            trace_ray(ray, scene, tracer_config.max_depth, tracer_config);
       }
-      Vec<3> ray_color =
-          accumalate_color / static_cast<double>(sample_per_pixel);
+      Vec<3> ray_color = accumalate_color /
+                         static_cast<double>(tracer_config.samples_per_pixel);
 
       ray_color[0] = std::sqrt(std::max(0.0, ray_color[0]));
       ray_color[1] = std::sqrt(std::max(0.0, ray_color[1]));

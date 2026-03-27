@@ -3,9 +3,13 @@
 #include "material.hpp"
 
 namespace {
-// 定义辅助函数 处理 阴影
-// 从被击中的点出发朝光源发射一条射线，检查是否有物体阻挡了光线
-// 为了防止自遮挡需要加一点偏移
+
+Vec<3> sky_color(const Ray &ray) {
+  Vec<3> unit_dir = ray.direction.normalized();
+  double t = 0.5 * (unit_dir[1] + 1.0);
+  return Vec<3>{1.0, 1.0, 1.0} * (1.0 - t) +
+         Vec<3>{0.5, 0.7, 1.0} * t; // 线性插值背景色
+}
 
 double random_double() { return rand() / (RAND_MAX + 1.0); }
 
@@ -45,7 +49,7 @@ Vec<3> reflect(const Vec<3> &v, const Vec<3> &n) {
   return v - n * (2.0 * (v * n));
 }
 bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
-                        Vec<3> &attenuation) {
+                        Vec<3> &attenuation, const TracerConfig &config) {
 
   Vec<3> scatter_dir = rec.normal + random_unit_vector();
 
@@ -53,13 +57,13 @@ bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
     scatter_dir = rec.normal;
   }
 
-  scattered = Ray(rec.point + rec.normal * 1e-4, scatter_dir);
+  scattered = Ray(rec.point + rec.normal * config.ray_epsilon, scatter_dir);
   attenuation = rec.material ? rec.material->albedo : Vec<3>{1.0, 1.0, 1.0};
   return true;
 }
 
 bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
-                   Vec<3> &attenuation) {
+                   Vec<3> &attenuation, const TracerConfig &config) {
   Vec<3> reflected = reflect(incoming.direction.normalized(), rec.normal);
   double fuzz =
       rec.material ? std::clamp(rec.material->roughness, 0.0, 1.0) : 0.0;
@@ -70,13 +74,14 @@ bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
     return false; // 散射方向与法线相反，丢弃
   }
 
-  scattered = Ray(rec.point + rec.normal * 1e-4, scattered_dir);
+  scattered = Ray(rec.point + rec.normal * config.ray_epsilon, scattered_dir);
   attenuation = rec.material ? rec.material->albedo : Vec<3>{1.0, 1.0, 1.0};
   return true;
 }
 
 bool scatter_dielectric(const HitRecord &rec, const Ray &incoming,
-                        Ray &scattered, Vec<3> &attenuation) {
+                        Ray &scattered, Vec<3> &attenuation,
+                        const TracerConfig &config) {
   attenuation = Vec<3>{1.0, 1.0, 1.0};
 
   double refraction_ratio =
@@ -98,28 +103,28 @@ bool scatter_dielectric(const HitRecord &rec, const Ray &incoming,
     direction = refract(unit_dir, rec.normal, refraction_ratio);
   }
 
-  scattered = Ray(rec.point + direction * 1e-4, direction);
+  scattered = Ray(rec.point + direction * config.ray_epsilon, direction);
   return true;
 }
 
 bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
-                      Vec<3> &attenuation) {
+                      Vec<3> &attenuation, const TracerConfig &config) {
 
   if (!rec.material) {
     attenuation = Vec<3>{1.0, 1.0, 1.0};
-    scattered = Ray(rec.point + rec.normal * 1e-4, rec.normal);
+    scattered = Ray(rec.point + rec.normal * config.ray_epsilon, rec.normal);
     return true;
   }
 
   switch (rec.material->type) {
 
   case MaterialType::Lambertian:
-    return scatter_lambertian(rec, scattered, attenuation);
+    return scatter_lambertian(rec, scattered, attenuation, config);
 
   case MaterialType::Metal:
-    return scatter_metal(rec, incoming, scattered, attenuation);
+    return scatter_metal(rec, incoming, scattered, attenuation, config);
   case MaterialType::Dielectric:
-    return scatter_dielectric(rec, incoming, scattered, attenuation);
+    return scatter_dielectric(rec, incoming, scattered, attenuation, config);
   }
 
   return false;
@@ -127,7 +132,8 @@ bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
 
 } // namespace
 
-Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth) {
+Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
+                 const TracerConfig &config) {
 
   if (depth <= 0) {
     return Vec<3>{0.0, 0.0, 0.0}; // 超过递归深度，返回黑色
@@ -137,16 +143,28 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth) {
     Ray scattered{{0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
     Vec<3> attenuation{1.0, 1.0, 1.0};
 
-    if (scatter_material(ray, rec, scattered, attenuation)) {
-      Vec<3> bounced = trace_ray(scattered, scene, depth - 1);
+    // 在达到一定深度后，使用 Russian Roulette 技术随机终止路径，以减少计算量
+    // 无偏估计
+    if (depth <= config.max_depth - config.rr_start_depth) {
+      double survive_prob =
+          std::max(attenuation[0], std::max(attenuation[1], attenuation[2]));
+      survive_prob = std::clamp(survive_prob, 0.10, 0.95);
+
+      if (random_double() > survive_prob) {
+        return Vec<3>{0.0, 0.0, 0.0}; // Russian Roulette 终止路径
+      }
+
+      attenuation = attenuation / survive_prob; // 反向补偿
+    }
+
+    if (scatter_material(ray, rec, scattered, attenuation, config)) {
+      Vec<3> bounced = trace_ray(scattered, scene, depth - 1, config);
 
       return Vec<3>{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
                     attenuation[2] * bounced[2]};
     }
     return Vec<3>{0.0, 0.0, 0.0}; // 材质散射失败，返回黑色
   }
-  Vec<3> unit_dir = ray.direction.normalized();
-  double t = 0.5 * (unit_dir[1] + 1.0);
-  return Vec<3>{1.0, 1.0, 1.0} * (1.0 - t) +
-         Vec<3>{0.5, 0.7, 1.0} * t; // 线性插值背景色
+
+  return sky_color(ray); // 没有击中任何物体，返回背景色
 }
