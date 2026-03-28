@@ -57,6 +57,8 @@ render/tracer_config.hpp
 render/light.hpp
 render/aabb.hpp
 scene/hittable.hpp
+scene/triangle.hpp
+scene/triangle.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

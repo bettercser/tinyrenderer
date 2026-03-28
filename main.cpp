@@ -19,6 +19,7 @@
 #include "scene/camera.hpp"
 #include "scene/scene.hpp"
 #include "scene/sphere.hpp"
+#include "scene/triangle.hpp"
 #include "tgaimage.h"
 #include <algorithm>
 #include <chrono>
@@ -273,6 +274,19 @@ int main(int argc, char **argv) {
   glass_sphere.radius = 0.5;
   glass_sphere.material = &glass_mat;
 
+  Material tri_mat;
+  tri_mat.type = MaterialType::Lambertian;
+  tri_mat.albedo = Vec<3>{1.0, 1.0, 0.2};
+
+  TrianglePrimitive tri;
+  tri.v0 = Vec<3>{-1.0, -0.5, -2.5};
+  tri.v1 = Vec<3>{1.0, -0.5, -2.5};
+  tri.v2 = Vec<3>{0.0, 1.0, -2.5};
+
+  tri.material = &tri_mat;
+
+  scene.objects.push_back(std::make_shared<TrianglePrimitive>(tri));
+
   scene.objects.push_back(std::make_shared<Sphere>(sphere1));
   scene.objects.push_back(std::make_shared<Sphere>(sphere2));
   scene.objects.push_back(std::make_shared<Sphere>(sphere3));
@@ -322,18 +336,20 @@ int main(int argc, char **argv) {
           }
         }
 
-        Vec<3> ray_color =
-            accumulated_color / static_cast<double>(tracer_config.samples_per_pixel);
+        Vec<3> ray_color = accumulated_color /
+                           static_cast<double>(tracer_config.samples_per_pixel);
 
         ray_color[0] = std::sqrt(std::max(0.0, ray_color[0]));
         ray_color[1] = std::sqrt(std::max(0.0, ray_color[1]));
         ray_color[2] = std::sqrt(std::max(0.0, ray_color[2]));
 
-        TGAColor out_color{
-            static_cast<unsigned char>(255.0 * std::clamp(ray_color[2], 0.0, 1.0)),
-            static_cast<unsigned char>(255.0 * std::clamp(ray_color[1], 0.0, 1.0)),
-            static_cast<unsigned char>(255.0 * std::clamp(ray_color[0], 0.0, 1.0)),
-            255};
+        TGAColor out_color{static_cast<unsigned char>(
+                               255.0 * std::clamp(ray_color[2], 0.0, 1.0)),
+                           static_cast<unsigned char>(
+                               255.0 * std::clamp(ray_color[1], 0.0, 1.0)),
+                           static_cast<unsigned char>(
+                               255.0 * std::clamp(ray_color[0], 0.0, 1.0)),
+                           255};
 
         image.set(x, ray_height - 1 - y, out_color);
       }
