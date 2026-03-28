@@ -297,17 +297,12 @@ int main(int argc, char **argv) {
   tri_mat.type = MaterialType::Lambertian;
   tri_mat.albedo = Vec<3>{1.0, 1.0, 0.2};
 
-  TrianglePrimitive tri;
-  tri.v0 = Vec<3>{-1.0, -0.5, -2.5};
-  tri.v1 = Vec<3>{1.0, -0.5, -2.5};
-  tri.v2 = Vec<3>{0.0, 1.0, -2.5};
-
-  tri.material = &tri_mat;
-
   Material mesh_mat;
   mesh_mat.type = MaterialType::Lambertian;
   mesh_mat.albedo = Vec<3>{0.9, 0.8, 0.3};
   Model mesh_model("../obj/african_head/african_head.obj");
+  mesh_mat.diffuse_texture = &mesh_model;
+  mesh_mat.use_diffuse_texture = true;
   auto mesh_objects =
       build_triangle_primitives_from_model(mesh_model, &mesh_mat);
 
@@ -315,8 +310,6 @@ int main(int argc, char **argv) {
     scene.objects.push_back(obj);
   }
 
-  // scene.objects.push_back(std::make_shared<TrianglePrimitive>(tri));
-  //
   // scene.objects.push_back(std::make_shared<Sphere>(sphere1));
   // scene.objects.push_back(std::make_shared<Sphere>(sphere2));
   // scene.objects.push_back(std::make_shared<Sphere>(sphere3));

@@ -5,6 +5,18 @@
 
 namespace {
 
+Vec<3> evaluate_albedo(const HitRecord &rec) {
+  if (!rec.material) {
+    return Vec<3>{1.0, 1.0, 1.0};
+  }
+  if (rec.material->use_diffuse_texture && rec.material->diffuse_texture) {
+    TGAColor tex = rec.material->diffuse_texture->diffuse(rec.uv);
+
+    return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
+  }
+  return rec.material->albedo;
+}
+
 bool is_in_shadow(const Scene &scene, const Vec<3> &point, const Vec<3> &normal,
                   const Vec<3> &light_dir, const TracerConfig &config) {
   Ray shadow_ray(point + normal * config.ray_epsilon, light_dir);
@@ -31,7 +43,7 @@ Vec<3> evaluating_direct_lighting(const Scene &scene, const HitRecord &rec,
     return Vec<3>{0.0, 0.0, 0.0}; // 法线背向光源，返回黑色
   }
 
-  Vec<3> base_color = rec.material->albedo;
+  Vec<3> base_color = evaluate_albedo(rec);
 
   return Vec<3>{base_color[0] * light.color[0], base_color[1] * light.color[1],
                 base_color[2] * light.color[2]} *
@@ -90,7 +102,7 @@ bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
   }
 
   scattered = Ray(rec.point + rec.normal * config.ray_epsilon, scatter_dir);
-  attenuation = rec.material ? rec.material->albedo : Vec<3>{1.0, 1.0, 1.0};
+  attenuation = evaluate_albedo(rec);
   return true;
 }
 

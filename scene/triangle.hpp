@@ -7,6 +7,8 @@
 
 struct TrianglePrimitive : Hittable {
   Vec<3> v0, v1, v2;
+  Vec<3> n0, n1, n2;
+  Vec<2> uv0, uv1, uv2;
 
   const Material *material = nullptr;
 

@@ -37,10 +37,12 @@ bool TrianglePrimitive::hit(const Ray &ray, double t_min, double t_max,
     return false; // 交点不在有效范围内
   }
 
+  double w = 1.0 - u - v;
   rec.t = t_hit;
   rec.point = ray.origin + ray.direction * rec.t;
-  Vec<3> outward_normal = edge1.cross(edge2).normalized();
-  rec.set_front_face(ray, outward_normal);
+  Vec<3> interpolated_normal = (n0 * w + n1 * u + n2 * v).normalized();
+  rec.set_front_face(ray, interpolated_normal);
+  rec.uv = uv0 * w + uv1 * u + uv2 * v;
   rec.material = material;
   return true;
 }
