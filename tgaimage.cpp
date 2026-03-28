@@ -1,9 +1,12 @@
 #include "tgaimage.h"
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 
 TGAImage::TGAImage(const int w, const int h, const int bpp)
     : w(w), h(h), bpp(bpp), data(w * h * bpp, 0) {}
+
+uint8_t TGAImage::get_bytespp() const { return bpp; }
 
 bool TGAImage::read_tga_file(const std::string filename) {
   std::ifstream in;

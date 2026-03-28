@@ -12,6 +12,7 @@
 #include "render/shaders/random_shader.hpp"
 #include "render/shaders/smooth_shader.hpp"
 #include "render/shaders/texture_shader.hpp"
+#include "render/texture_mip.hpp"
 #include "render/tracer.hpp"
 #include "render/tracer_config.hpp"
 #include "render/utils/render_util.hpp"
@@ -305,6 +306,13 @@ int main(int argc, char **argv) {
   mesh_mat.use_diffuse_texture = true;
   mesh_mat.normal_texture = &mesh_model;
   mesh_mat.use_normal_texture = true;
+  mesh_mat.specular_texture = &mesh_model;
+  mesh_mat.use_specular_texture = true;
+
+  TextureMipChain mesh_diffuse_mips =
+      build_mip_chain(*mesh_model.diffuse_image());
+  mesh_mat.mip_chain = &mesh_diffuse_mips;
+
   auto mesh_objects =
       build_triangle_primitives_from_model(mesh_model, &mesh_mat);
 

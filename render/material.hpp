@@ -2,6 +2,7 @@
 
 #include "../Vector.hh"
 #include "../model.hpp"
+#include "texture_mip.hpp"
 
 enum class MaterialType {
   Lambertian,
@@ -23,4 +24,8 @@ struct Material {
 
   const Model *normal_texture = nullptr; // 法线贴图
   bool use_normal_texture = false;       // 是否使用法线贴图
+
+  const Model *specular_texture = nullptr;    // 镜面反射贴图
+  bool use_specular_texture = false;          // 是否使用镜面反射贴图
+  const TextureMipChain *mip_chain = nullptr; // 纹理MIP链
 };

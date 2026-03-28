@@ -1,7 +1,9 @@
 #include "tracer.hpp"
 #include "hit_record.hpp"
 #include "material.hpp"
+#include "texture_mip.hpp"
 #include "utils/render_util.hpp"
+#include <algorithm>
 
 namespace {
 
@@ -27,10 +29,31 @@ Vec<3> evaluate_shading_normal(const HitRecord &rec) {
   return rec.normal;
 }
 
+double evaluate_roughness(const HitRecord &rec) {
+  if (!rec.material) {
+    return 0.0; // 默认粗糙度
+  }
+
+  double roughness = rec.material->roughness;
+
+  if (rec.material->use_specular_texture && rec.material->specular_texture) {
+    double spec = rec.material->specular_texture->specular(rec.uv);
+    roughness =
+        1.0 - std::clamp(spec / 255.0, 0.0, 1.0); // 将贴图值转换为粗糙度
+  }
+  return std::clamp(roughness, 0.0, 1.0);
+}
+
 Vec<3> evaluate_albedo(const HitRecord &rec) {
   if (!rec.material) {
     return Vec<3>{1.0, 1.0, 1.0};
   }
+  if (rec.material->mip_chain && !rec.material->mip_chain->empty()) {
+    TGAColor tex = sample_mip_nearest(*rec.material->mip_chain, rec.uv, 0);
+
+    return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
+  }
+
   if (rec.material->use_diffuse_texture && rec.material->diffuse_texture) {
     TGAColor tex = rec.material->diffuse_texture->diffuse(rec.uv);
 
@@ -134,8 +157,7 @@ bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
 bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
                    Vec<3> &attenuation, const TracerConfig &config) {
   Vec<3> reflected = reflect(incoming.direction.normalized(), rec.normal);
-  double fuzz =
-      rec.material ? std::clamp(rec.material->roughness, 0.0, 1.0) : 0.0;
+  double fuzz = evaluate_roughness(rec);
 
   Vec<3> scattered_dir = reflected + random_in_unit_sphere() * fuzz;
 
@@ -144,7 +166,7 @@ bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
   }
 
   scattered = Ray(rec.point + rec.normal * config.ray_epsilon, scattered_dir);
-  attenuation = rec.material ? rec.material->albedo : Vec<3>{1.0, 1.0, 1.0};
+  attenuation = evaluate_albedo(rec);
   return true;
 }
 

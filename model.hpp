@@ -74,4 +74,5 @@ public:
         diffuse_map->get(static_cast<int>(p[0]), static_cast<int>(p[1]));
     return c;
   }
+  const TGAImage *diffuse_image() const { return diffuse_map.get(); }
 };
