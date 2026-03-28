@@ -37,12 +37,28 @@ bool TrianglePrimitive::hit(const Ray &ray, double t_min, double t_max,
     return false; // 交点不在有效范围内
   }
 
+  Vec<2> delta_uv1 = uv1 - uv0;
+  Vec<2> delta_uv2 = uv2 - uv0;
+
+  double det = delta_uv1[0] * delta_uv2[1] - delta_uv1[1] * delta_uv2[0];
+
   double w = 1.0 - u - v;
   rec.t = t_hit;
   rec.point = ray.origin + ray.direction * rec.t;
+  rec.uv = uv0 * w + uv1 * u + uv2 * v;
+
   Vec<3> interpolated_normal = (n0 * w + n1 * u + n2 * v).normalized();
   rec.set_front_face(ray, interpolated_normal);
-  rec.uv = uv0 * w + uv1 * u + uv2 * v;
+
+  double inv_det = 1.0 / det;
+  Vec<3> tangent = (edge1 * delta_uv2[1] - edge2 * delta_uv1[1]) * inv_det;
+  Vec<3> bitangent = (edge2 * delta_uv1[0] - edge1 * delta_uv2[0]) * inv_det;
+  tangent = (tangent - interpolated_normal * (interpolated_normal * tangent))
+                .normalized();
+  bitangent = interpolated_normal.cross(tangent).normalized();
+  rec.tangent = tangent;
+  rec.bitangent = bitangent;
+
   rec.material = material;
   return true;
 }

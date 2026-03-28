@@ -9,6 +9,8 @@ struct HitRecord {
   Vec<3> point;
   Vec<3> normal;
   Vec<2> uv;
+  Vec<3> tangent;
+  Vec<3> bitangent;
 
   const Material *material = nullptr;
   bool front_face = true;

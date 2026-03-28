@@ -303,6 +303,8 @@ int main(int argc, char **argv) {
   Model mesh_model("../obj/african_head/african_head.obj");
   mesh_mat.diffuse_texture = &mesh_model;
   mesh_mat.use_diffuse_texture = true;
+  mesh_mat.normal_texture = &mesh_model;
+  mesh_mat.use_normal_texture = true;
   auto mesh_objects =
       build_triangle_primitives_from_model(mesh_model, &mesh_mat);
 

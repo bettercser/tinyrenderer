@@ -20,4 +20,7 @@ struct Material {
   double ior = 1.5;                       // 折射率（仅对Dielectric有效）
   const Model *diffuse_texture = nullptr; // 漫反射贴图
   bool use_diffuse_texture = false;       // 是否使用漫反射贴图
+
+  const Model *normal_texture = nullptr; // 法线贴图
+  bool use_normal_texture = false;       // 是否使用法线贴图
 };

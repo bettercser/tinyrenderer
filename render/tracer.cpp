@@ -5,6 +5,28 @@
 
 namespace {
 
+Vec<3> evaluate_shading_normal(const HitRecord &rec) {
+  if (!rec.material) {
+    return rec.normal;
+  }
+
+  if (rec.material->use_normal_texture && rec.material->normal_texture) {
+
+    Vec<4> sampled = rec.material->normal_texture->get_normal(rec.uv);
+
+    Vec<3> tangent{sampled[0], sampled[1], sampled[2]};
+
+    tangent = tangent.normalized();
+
+    Vec<3> world_normal = (rec.tangent * tangent[0] +
+                           rec.bitangent * tangent[1] + rec.normal * tangent[2])
+                              .normalized();
+    return world_normal;
+  }
+
+  return rec.normal;
+}
+
 Vec<3> evaluate_albedo(const HitRecord &rec) {
   if (!rec.material) {
     return Vec<3>{1.0, 1.0, 1.0};
@@ -34,11 +56,13 @@ Vec<3> evaluating_direct_lighting(const Scene &scene, const HitRecord &rec,
   }
   Vec<3> light_dir = (-light.direction).normalized();
 
-  if (is_in_shadow(scene, rec.point, rec.normal, light_dir, config)) {
+  Vec<3> shading_normal = evaluate_shading_normal(rec);
+
+  if (is_in_shadow(scene, rec.point, shading_normal, light_dir, config)) {
     return Vec<3>{0.0, 0.0, 0.0}; // 在阴影中，返回黑色
   }
 
-  double n_dot_l = std::max(0.0, rec.normal * light_dir);
+  double n_dot_l = std::max(0.0, shading_normal * light_dir);
   if (n_dot_l <= 0.0) {
     return Vec<3>{0.0, 0.0, 0.0}; // 法线背向光源，返回黑色
   }
@@ -95,13 +119,14 @@ Vec<3> reflect(const Vec<3> &v, const Vec<3> &n) {
 bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
                         Vec<3> &attenuation, const TracerConfig &config) {
 
-  Vec<3> scatter_dir = rec.normal + random_unit_vector();
+  Vec<3> shading_normal = evaluate_shading_normal(rec);
+  Vec<3> scatter_dir = shading_normal + random_unit_vector();
 
   if (scatter_dir * scatter_dir < 1e-8) {
-    scatter_dir = rec.normal;
+    scatter_dir = shading_normal;
   }
 
-  scattered = Ray(rec.point + rec.normal * config.ray_epsilon, scatter_dir);
+  scattered = Ray(rec.point + shading_normal * config.ray_epsilon, scatter_dir);
   attenuation = evaluate_albedo(rec);
   return true;
 }
