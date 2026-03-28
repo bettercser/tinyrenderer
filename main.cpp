@@ -17,6 +17,7 @@
 #include "render/utils/render_util.hpp"
 #include "scene/bvh_node.hpp"
 #include "scene/camera.hpp"
+#include "scene/mesh_loader.hpp"
 #include "scene/scene.hpp"
 #include "scene/sphere.hpp"
 #include "scene/triangle.hpp"
@@ -27,6 +28,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -98,6 +100,23 @@ Matrix<4> create_light_viewport_matrix(const int size) {
   LightViewport[3][3] = 1.0;
 
   return LightViewport;
+}
+
+void print_progress(const char *label, int current, int total) {
+  constexpr int bar_width = 40;
+  double progress = total > 0 ? static_cast<double>(current) / total : 1.0;
+  int filled = static_cast<int>(progress * bar_width);
+
+  std::cout << '\r' << label << " [";
+  for (int i = 0; i < bar_width; ++i) {
+    std::cout << (i < filled ? '=' : ' ');
+  }
+  std::cout << "] " << std::setw(3) << static_cast<int>(progress * 100.0) << '%'
+            << std::flush;
+
+  if (current == total) {
+    std::cout << '\n';
+  }
 }
 
 int main(int argc, char **argv) {
@@ -285,13 +304,24 @@ int main(int argc, char **argv) {
 
   tri.material = &tri_mat;
 
-  scene.objects.push_back(std::make_shared<TrianglePrimitive>(tri));
+  Material mesh_mat;
+  mesh_mat.type = MaterialType::Lambertian;
+  mesh_mat.albedo = Vec<3>{0.9, 0.8, 0.3};
+  Model mesh_model("../obj/african_head/african_head.obj");
+  auto mesh_objects =
+      build_triangle_primitives_from_model(mesh_model, &mesh_mat);
 
-  scene.objects.push_back(std::make_shared<Sphere>(sphere1));
-  scene.objects.push_back(std::make_shared<Sphere>(sphere2));
-  scene.objects.push_back(std::make_shared<Sphere>(sphere3));
+  for (const auto &obj : mesh_objects) {
+    scene.objects.push_back(obj);
+  }
+
+  // scene.objects.push_back(std::make_shared<TrianglePrimitive>(tri));
+  //
+  // scene.objects.push_back(std::make_shared<Sphere>(sphere1));
+  // scene.objects.push_back(std::make_shared<Sphere>(sphere2));
+  // scene.objects.push_back(std::make_shared<Sphere>(sphere3));
   scene.objects.push_back(std::make_shared<Sphere>(ground));
-  scene.objects.push_back(std::make_shared<Sphere>(glass_sphere));
+  // scene.objects.push_back(std::make_shared<Sphere>(glass_sphere));
   TracerConfig tracer_config;
   DirectionalLight light;
   light.direction = Vec<3>{1.0, -1.0, -1.0}.normalized();
@@ -353,6 +383,9 @@ int main(int argc, char **argv) {
 
         image.set(x, ray_height - 1 - y, out_color);
       }
+
+      print_progress(use_bvh ? "Path tracing BVH   " : "Path tracing linear",
+                     y + 1, ray_height);
     }
 
     auto end = std::chrono::steady_clock::now();
@@ -361,10 +394,10 @@ int main(int argc, char **argv) {
     return std::chrono::duration<double, std::milli>(end - start).count();
   };
 
-  double linear_ms = render_path_trace(false, "ray_traced_linear.tga");
+  // double linear_ms = render_path_trace(false, "ray_traced_linear.tga");
   double bvh_ms = render_path_trace(true, "ray_traced_bvh.tga");
 
-  std::cout << "Path tracing (linear): " << linear_ms << " ms\n";
+  // std::cout << "Path tracing (linear): " << linear_ms << " ms\n";
   std::cout << "Path tracing (BVH):    " << bvh_ms << " ms\n";
 
   // Model eye_outer_model("../obj/african_head/african_head_eye_outer.obj");
