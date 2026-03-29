@@ -9,10 +9,19 @@
 
 namespace {
 
+constexpr double PI = 3.14159265358979323846;
+
 struct MaterialSample {
-  Vec<3> albedo;
+  Vec<3> base_color;
   Vec<3> shading_normal;
   double roughness;
+  double metallic;
+};
+
+struct SphereLightSample {
+  Vec<3> point;
+  Vec<3> normal;
+  double pdf = 0.0;
 };
 
 Vec<3> evaluate_shading_normal(const HitRecord &rec) {
@@ -52,7 +61,7 @@ double evaluate_roughness(const HitRecord &rec) {
   return std::clamp(roughness, 0.0, 1.0);
 }
 
-Vec<3> evaluate_albedo(const HitRecord &rec) {
+Vec<3> evaluate_base_color(const HitRecord &rec) {
   if (!rec.material) {
     return Vec<3>{1.0, 1.0, 1.0};
   }
@@ -67,14 +76,15 @@ Vec<3> evaluate_albedo(const HitRecord &rec) {
 
     return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
   }
-  return rec.material->albedo;
+  return rec.material->base_color;
 }
 
 MaterialSample evaluate_material_sample(const HitRecord &rec) {
   MaterialSample sample;
-  sample.albedo = evaluate_albedo(rec);
+  sample.base_color = evaluate_base_color(rec);
   sample.shading_normal = evaluate_shading_normal(rec);
   sample.roughness = evaluate_roughness(rec);
+  sample.metallic = rec.material ? rec.material->metallic : 0.0;
   return sample;
 }
 
@@ -107,7 +117,7 @@ Vec<3> evaluating_directional_direct_lighting(const Scene &scene,
   if (n_dot_l <= 0.0) {
     return Vec<3>{0.0, 0.0, 0.0}; // 法线背向光源，返回黑色
   }
-  Vec<3> base_color = sample.albedo;
+  Vec<3> base_color = sample.base_color;
 
   return Vec<3>{base_color[0] * light.color[0], base_color[1] * light.color[1],
                 base_color[2] * light.color[2]} *
@@ -168,7 +178,7 @@ bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
 
   scattered =
       Ray(rec.point + sample.shading_normal * config.ray_epsilon, scatter_dir);
-  attenuation = sample.albedo;
+  attenuation = sample.base_color;
   return true;
 }
 
@@ -188,7 +198,7 @@ bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
 
   scattered = Ray(rec.point + sample.shading_normal * config.ray_epsilon,
                   scattered_dir);
-  attenuation = sample.albedo;
+  attenuation = sample.base_color;
   return true;
 }
 
@@ -243,8 +253,18 @@ bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
 
   return false;
 }
-Vec<3> sample_point_on_sphere_light(const LightRecord &light) {
-  return light.position + random_unit_vector() * light.radius;
+
+SphereLightSample sample_sphere_light(const LightRecord &light) {
+  Vec<3> dir = random_unit_vector();
+
+  SphereLightSample sample;
+  sample.point = light.position + dir * light.radius;
+  sample.normal = dir.normalized();
+
+  double area = 4.0 * PI * light.radius * light.radius;
+  sample.pdf = area > 0.0 ? 1.0 / area : 0.0;
+
+  return sample;
 }
 
 bool is_emissive(const HitRecord &rec) {
@@ -274,8 +294,8 @@ Vec<3> evaluate_emissive_direct_lighting(const Scene &scene,
 
   for (const auto &light : scene.lights) {
 
-    Vec<3> light_point = sample_point_on_sphere_light(light);
-    Vec<3> to_light = light_point - rec.point;
+    SphereLightSample light_sample = sample_sphere_light(light);
+    Vec<3> to_light = light_sample.point - rec.point;
     double dist2 = to_light * to_light;
 
     Vec<3> light_dir = to_light.normalized();
@@ -285,6 +305,12 @@ Vec<3> evaluate_emissive_direct_lighting(const Scene &scene,
     if (n_dot_l <= 0.0) {
       continue;
     }
+    Vec<3> light_to_surface = (rec.point - light_sample.point).normalized();
+    double light_cos = std::max(light_sample.normal * light_to_surface, 0.0);
+    if (light_cos <= 0.0) {
+      continue;
+    }
+
     Ray shadow_ray(rec.point + sample.shading_normal * config.ray_epsilon,
                    light_dir);
     HitRecord shadow_rec;
@@ -298,10 +324,12 @@ Vec<3> evaluate_emissive_direct_lighting(const Scene &scene,
     }
 
     Vec<3> emission = evaluate_emission(shadow_rec);
-    result +=
-        Vec<3>{sample.albedo[0] * emission[0], sample.albedo[1] * emission[1],
-               sample.albedo[2] * emission[2]} *
-        (n_dot_l / std::max(dist2, 1e-6));
+
+    double geometry = (n_dot_l * light_cos) / std::max(dist2, 1e-6);
+    result += Vec<3>{sample.base_color[0] * emission[0],
+                     sample.base_color[1] * emission[1],
+                     sample.base_color[2] * emission[2]} *
+              (geometry / light_sample.pdf);
   }
   return result;
 }

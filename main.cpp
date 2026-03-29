@@ -232,7 +232,7 @@ int main(int argc, char **argv) {
   // ray_camera.aspect_ratio = static_cast<double>(width) / height;
   // Ray center_ray = ray_camera.generate_ray(0.5, 0.5);
   Material test_material;
-  test_material.albedo = Vec<3>{1.0, 0.0, 0.0};
+  test_material.base_color = Vec<3>{1.0, 0.0, 0.0};
   Sphere test_sphere;
   test_sphere.center = Vec<3>{0.0, 0.0, -3.0};
   test_sphere.radius = 1.0;
@@ -252,18 +252,18 @@ int main(int argc, char **argv) {
   ray_camera.aspect_ratio = static_cast<double>(ray_width) / ray_height;
 
   Material red_mat;
-  red_mat.albedo = Vec<3>{1.0, 0.2, 0.2};
+  red_mat.base_color = Vec<3>{1.0, 0.2, 0.2};
 
   Material green_mat;
-  green_mat.albedo = Vec<3>{0.2, 1.0, 0.2};
+  green_mat.base_color = Vec<3>{0.2, 1.0, 0.2};
 
   Material blue_mat;
   blue_mat.type = MaterialType::Metal;
-  blue_mat.albedo = Vec<3>{0.8, 0.85, 1.0};
+  blue_mat.base_color = Vec<3>{0.8, 0.85, 1.0};
   blue_mat.roughness = 0.05;
 
   Material ground_mat;
-  ground_mat.albedo = Vec<3>{0.8, 0.8, 0.75};
+  ground_mat.base_color = Vec<3>{0.8, 0.8, 0.75};
 
   Material glass_mat;
   glass_mat.type = MaterialType::Dielectric;
@@ -297,11 +297,11 @@ int main(int argc, char **argv) {
 
   Material tri_mat;
   tri_mat.type = MaterialType::Lambertian;
-  tri_mat.albedo = Vec<3>{1.0, 1.0, 0.2};
+  tri_mat.base_color = Vec<3>{1.0, 1.0, 0.2};
 
   Material mesh_mat;
   mesh_mat.type = MaterialType::Lambertian;
-  mesh_mat.albedo = Vec<3>{0.9, 0.8, 0.3};
+  mesh_mat.base_color = Vec<3>{0.9, 0.8, 0.3};
   Model mesh_model("../obj/african_head/african_head.obj");
   mesh_mat.diffuse_texture = &mesh_model;
   mesh_mat.use_diffuse_texture = true;
@@ -319,6 +319,12 @@ int main(int argc, char **argv) {
   light_sphere.radius = 0.8;
   light_sphere.material = &light_mat;
 
+  red_mat.metallic = 0.0;
+  green_mat.metallic = 0.0;
+  mesh_mat.metallic = 0.0;
+  blue_mat.metallic = 1.0;
+  glass_mat.metallic = 0.0;
+
   scene.objects.push_back(std::make_shared<Sphere>(light_sphere));
   scene.lights.push_back(LightRecord{light_sphere.center, light_mat.emission,
                                      light_sphere.radius});
@@ -334,9 +340,9 @@ int main(int argc, char **argv) {
     scene.objects.push_back(obj);
   }
 
-  // scene.objects.push_back(std::make_shared<Sphere>(sphere1));
-  // scene.objects.push_back(std::make_shared<Sphere>(sphere2));
-  // scene.objects.push_back(std::make_shared<Sphere>(sphere3));
+  scene.objects.push_back(std::make_shared<Sphere>(sphere1));
+  scene.objects.push_back(std::make_shared<Sphere>(sphere2));
+  scene.objects.push_back(std::make_shared<Sphere>(sphere3));
   scene.objects.push_back(std::make_shared<Sphere>(ground));
   scene.objects.push_back(std::make_shared<Sphere>(glass_sphere));
   TracerConfig tracer_config;

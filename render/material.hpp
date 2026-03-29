@@ -14,7 +14,7 @@ struct Material {
   // 基础反射颜色
 
   MaterialType type = MaterialType::Lambertian;
-  Vec<3> albedo{1.0, 1.0, 1.0};
+  Vec<3> base_color{1.0, 1.0, 1.0};
   Vec<3> emission{0.0, 0.0, 0.0};           // 自发光颜色
   Vec<3> transmission_color{1.0, 1.0, 1.0}; // 透射颜色（仅对Dielectric有效）
 
