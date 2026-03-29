@@ -12,6 +12,8 @@ struct HitRecord {
   Vec<3> tangent;
   Vec<3> bitangent;
 
+  double view_distance = 0.0;
+
   const Material *material = nullptr;
   bool front_face = true;
 

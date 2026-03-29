@@ -107,3 +107,22 @@ inline TGAColor sample_mip_bilinear(const TextureMipChain &chain,
   }
   return result;
 }
+
+inline TGAColor sample_mip_trilinear(const TextureMipChain &chain,
+                                     const Vec<2> &uv, double level_f) {
+  int level0 = static_cast<int>(std::floor(level_f));
+  int level1 = std::min(level0 + 1, chain.levels() - 1);
+
+  double t = level_f - level0;
+
+  TGAColor c0 = sample_mip_bilinear(chain, uv, level0);
+  TGAColor c1 = sample_mip_bilinear(chain, uv, level1);
+
+  TGAColor result;
+  for (int i = 0; i < c0.bytespp; ++i) {
+    double value = (1.0 - t) * c0[i] + t * c1[i];
+    result[i] = static_cast<unsigned char>(std::clamp(value, 0.0, 255.0));
+  }
+
+  return result;
+}

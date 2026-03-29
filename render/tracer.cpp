@@ -23,6 +23,88 @@ struct SphereLightSample {
   Vec<3> normal;
   double pdf = 0.0;
 };
+int estimate_mip_level(const TextureMipChain &chain, const HitRecord &rec) {
+  if (chain.empty()) {
+    return 0;
+  }
+
+  double d = rec.view_distance;
+
+  int level = 0;
+  if (d > 2.0)
+    level = 1;
+  if (d > 4.0)
+    level = 2;
+  if (d > 8.0)
+    level = 3;
+  if (d > 16.0)
+    level = 4;
+
+  return std::clamp(level, 0, chain.levels() - 1);
+}
+
+double estimate_mip_level_f(const TextureMipChain &chain,
+                            const HitRecord &rec) {
+  if (chain.empty()) {
+    return 0.0;
+  }
+
+  double d = rec.view_distance;
+  double level = 0.0;
+
+  if (d > 1.0) {
+    level = std::log2(d);
+  }
+
+  return std::clamp(level, 0.0, static_cast<double>(chain.levels() - 1));
+}
+
+Vec<3> sample_diffuse_texture(const Material &material, const HitRecord &rec) {
+  if (material.mip_chain && !material.mip_chain->empty()) {
+    TGAColor tex =
+        sample_mip_trilinear(*material.mip_chain, rec.uv,
+                             estimate_mip_level_f(*material.mip_chain, rec));
+
+    return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
+  }
+
+  if (material.use_diffuse_texture && material.diffuse_texture) {
+    TGAColor tex = material.diffuse_texture->diffuse(rec.uv);
+
+    return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
+  }
+  return material.base_color;
+}
+
+Vec<3> sample_normal_texture(const Material &material, const Vec<2> &uv) {
+  if (material.use_normal_texture && material.normal_texture) {
+    Vec<4> sampled = material.normal_texture->get_normal(uv);
+    return Vec<3>{sampled[0], sampled[1], sampled[2]};
+  }
+
+  return Vec<3>{0.0, 0.0, 1.0};
+}
+
+double sample_specular_texture(const Material &material, const Vec<2> &uv) {
+  if (material.use_specular_texture && material.specular_texture) {
+    return material.specular_texture->specular(uv);
+  }
+
+  return 1.0 - material.roughness;
+}
+
+double evaluate_roughness(const HitRecord &rec) {
+  if (!rec.material) {
+    return 0.0; // 默认粗糙度
+  }
+
+  double roughness = rec.material->roughness;
+
+  double spec =
+      sample_specular_texture(*rec.material, rec.uv); // 从贴图获取镜面反射值
+  roughness = 1.0 - std::clamp(spec, 0.0, 1.0);       // 将贴图值转换为粗糙度
+  return std::clamp(roughness, 0.0, 1.0);
+}
 
 Vec<3> evaluate_shading_normal(const HitRecord &rec) {
   if (!rec.material) {
@@ -31,10 +113,7 @@ Vec<3> evaluate_shading_normal(const HitRecord &rec) {
 
   if (rec.material->use_normal_texture && rec.material->normal_texture) {
 
-    Vec<4> sampled = rec.material->normal_texture->get_normal(rec.uv);
-
-    Vec<3> tangent_normal{sampled[0], sampled[1], sampled[2]};
-
+    Vec<3> tangent_normal = sample_normal_texture(*rec.material, rec.uv);
     tangent_normal = tangent_normal.normalized();
 
     Vec<3> world_normal =
@@ -47,36 +126,12 @@ Vec<3> evaluate_shading_normal(const HitRecord &rec) {
   return rec.normal;
 }
 
-double evaluate_roughness(const HitRecord &rec) {
-  if (!rec.material) {
-    return 0.0; // 默认粗糙度
-  }
-
-  double roughness = rec.material->roughness;
-
-  if (rec.material->use_specular_texture && rec.material->specular_texture) {
-    double spec = rec.material->specular_texture->specular(rec.uv);
-    roughness = 1.0 - std::clamp(spec, 0.0, 1.0); // 将贴图值转换为粗糙度
-  }
-  return std::clamp(roughness, 0.0, 1.0);
-}
-
 Vec<3> evaluate_base_color(const HitRecord &rec) {
   if (!rec.material) {
     return Vec<3>{1.0, 1.0, 1.0};
   }
-  if (rec.material->mip_chain && !rec.material->mip_chain->empty()) {
-    TGAColor tex = sample_mip_bilinear(*rec.material->mip_chain, rec.uv, 0);
 
-    return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
-  }
-
-  if (rec.material->use_diffuse_texture && rec.material->diffuse_texture) {
-    TGAColor tex = rec.material->diffuse_texture->diffuse(rec.uv);
-
-    return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
-  }
-  return rec.material->base_color;
+  return sample_diffuse_texture(*rec.material, rec);
 }
 
 MaterialSample evaluate_material_sample(const HitRecord &rec) {

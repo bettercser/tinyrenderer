@@ -30,6 +30,7 @@ bool Sphere::hit(const Ray &ray, double t_min, double t_max,
   Vec<3> outward_normal = (rec.point - center).normalized();
   rec.set_front_face(ray, outward_normal);
   rec.material = material;
+  rec.view_distance = rec.t;
 
   return true;
 }

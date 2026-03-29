@@ -60,6 +60,7 @@ bool TrianglePrimitive::hit(const Ray &ray, double t_min, double t_max,
   rec.bitangent = bitangent;
 
   rec.material = material;
+  rec.view_distance = rec.t;
   return true;
 }
 
