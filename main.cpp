@@ -268,6 +268,7 @@ int main(int argc, char **argv) {
   Material glass_mat;
   glass_mat.type = MaterialType::Dielectric;
   glass_mat.ior = 1.5;
+  glass_mat.transmission_color = Vec<3>{0.65, 0.85, 1.0};
 
   Sphere sphere1;
   sphere1.center = Vec<3>{0.1, 0.5, -3.0};
@@ -319,6 +320,8 @@ int main(int argc, char **argv) {
   light_sphere.material = &light_mat;
 
   scene.objects.push_back(std::make_shared<Sphere>(light_sphere));
+  scene.lights.push_back(LightRecord{light_sphere.center, light_mat.emission,
+                                     light_sphere.radius});
 
   TextureMipChain mesh_diffuse_mips =
       build_mip_chain(*mesh_model.diffuse_image());
@@ -335,7 +338,7 @@ int main(int argc, char **argv) {
   // scene.objects.push_back(std::make_shared<Sphere>(sphere2));
   // scene.objects.push_back(std::make_shared<Sphere>(sphere3));
   scene.objects.push_back(std::make_shared<Sphere>(ground));
-  // scene.objects.push_back(std::make_shared<Sphere>(glass_sphere));
+  scene.objects.push_back(std::make_shared<Sphere>(glass_sphere));
   TracerConfig tracer_config;
   DirectionalLight light;
   light.direction = Vec<3>{1.0, -1.0, -1.0}.normalized();
@@ -376,7 +379,7 @@ int main(int argc, char **argv) {
 
             Ray ray = ray_camera.generate_ray(uv[0], uv[1]);
             accumulated_color += trace_ray(ray, scene, tracer_config.max_depth,
-                                           light, light_sphere, tracer_config);
+                                           light, tracer_config);
           }
         }
 

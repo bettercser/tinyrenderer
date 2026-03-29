@@ -195,7 +195,8 @@ bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
 bool scatter_dielectric(const HitRecord &rec, const Ray &incoming,
                         Ray &scattered, Vec<3> &attenuation,
                         const TracerConfig &config) {
-  attenuation = Vec<3>{1.0, 1.0, 1.0};
+  attenuation =
+      rec.material ? rec.material->transmission_color : Vec<3>{1.0, 1.0, 1.0};
 
   double refraction_ratio =
       rec.front_face ? (1.0 / rec.material->ior) : rec.material->ior;
@@ -242,6 +243,9 @@ bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
 
   return false;
 }
+Vec<3> sample_point_on_sphere_light(const LightRecord &light) {
+  return light.position + random_unit_vector() * light.radius;
+}
 
 bool is_emissive(const HitRecord &rec) {
   if (!rec.material) {
@@ -260,56 +264,55 @@ Vec<3> evaluate_emission(const HitRecord &rec) {
 
 Vec<3> evaluate_emissive_direct_lighting(const Scene &scene,
                                          const HitRecord &rec,
-                                         const Sphere &light_sphere,
                                          const TracerConfig &config) {
 
   if (!rec.material || rec.material->type != MaterialType::Lambertian) {
     return Vec<3>{0.0, 0.0, 0.0};
   }
+  MaterialSample sample = evaluate_material_sample(rec);
+  Vec<3> result{0.0, 0.0, 0.0};
 
-  if (!light_sphere.material) {
-    return Vec<3>{0.0, 0.0, 0.0};
+  for (const auto &light : scene.lights) {
+
+    Vec<3> light_point = sample_point_on_sphere_light(light);
+    Vec<3> to_light = light_point - rec.point;
+    double dist2 = to_light * to_light;
+
+    Vec<3> light_dir = to_light.normalized();
+
+    double n_dot_l = std::max(sample.shading_normal * light_dir, 0.0);
+
+    if (n_dot_l <= 0.0) {
+      continue;
+    }
+    Ray shadow_ray(rec.point + sample.shading_normal * config.ray_epsilon,
+                   light_dir);
+    HitRecord shadow_rec;
+    if (!scene.hit(shadow_ray, config.ray_epsilon,
+                   std::sqrt(dist2) - config.ray_epsilon, shadow_rec)) {
+      continue;
+    }
+
+    if (!is_emissive(shadow_rec)) {
+      continue;
+    }
+
+    Vec<3> emission = evaluate_emission(shadow_rec);
+    result +=
+        Vec<3>{sample.albedo[0] * emission[0], sample.albedo[1] * emission[1],
+               sample.albedo[2] * emission[2]} *
+        (n_dot_l / std::max(dist2, 1e-6));
   }
-
-  Vec<3> sample = evaluate_albedo(rec);
-  Vec<3> shading_normal = evaluate_shading_normal(rec);
-
-  Vec<3> to_light = light_sphere.center - rec.point;
-  double dist2 = to_light * to_light;
-
-  Vec<3> light_dir = to_light.normalized();
-
-  double n_dot_l = std::max(shading_normal * light_dir, 0.0);
-
-  if (n_dot_l <= 0.0) {
-    return Vec<3>{0.0, 0.0, 0.0};
-  }
-  Ray shadow_ray(rec.point + shading_normal * config.ray_epsilon, light_dir);
-  HitRecord shadow_rec;
-  if (!scene.hit(shadow_ray, config.ray_epsilon,
-                 std::sqrt(dist2) - config.ray_epsilon, shadow_rec)) {
-    return Vec<3>{0.0, 0.0, 0.0};
-  }
-
-  if (!is_emissive(shadow_rec)) {
-    return Vec<3>{0.0, 0.0, 0.0};
-  }
-
-  Vec<3> emission = evaluate_emission(shadow_rec);
-  return Vec<3>{sample[0] * emission[0], sample[1] * emission[1],
-                sample[2] * emission[2]} *
-         (n_dot_l / std::max(dist2, 1e-6));
+  return result;
 }
 
 Vec<3> evaluate_direct_lighting(const Scene &scene, const HitRecord &rec,
                                 const DirectionalLight &light,
-                                const Sphere &emissive_light,
                                 const TracerConfig &config) {
 
   Vec<3> direct{0.0, 0.0, 0.0};
   direct += evaluating_directional_direct_lighting(scene, rec, light, config);
-  direct +=
-      evaluate_emissive_direct_lighting(scene, rec, emissive_light, config);
+  direct += evaluate_emissive_direct_lighting(scene, rec, config);
 
   return direct;
 }
@@ -317,8 +320,7 @@ Vec<3> evaluate_direct_lighting(const Scene &scene, const HitRecord &rec,
 } // namespace
 
 Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
-                 const DirectionalLight &light, const Sphere &emissive_light,
-                 const TracerConfig &config) {
+                 const DirectionalLight &light, const TracerConfig &config) {
 
   if (depth <= 0) {
     return Vec<3>{0.0, 0.0, 0.0}; // 超过递归深度，返回黑色
@@ -333,8 +335,7 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
     Vec<3> attenuation{1.0, 1.0, 1.0};
     Vec<3> direct{0.0, 0.0, 0.0};
     if (config.enable_direct_lighting) {
-      direct =
-          evaluate_direct_lighting(scene, rec, light, emissive_light, config);
+      direct = evaluate_direct_lighting(scene, rec, light, config);
     }
 
     if (scatter_material(ray, rec, scattered, attenuation, config)) {
@@ -351,8 +352,7 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
 
         attenuation = attenuation / survive_prob; // 反向补偿
       }
-      Vec<3> bounced =
-          trace_ray(scattered, scene, depth - 1, light, emissive_light, config);
+      Vec<3> bounced = trace_ray(scattered, scene, depth - 1, light, config);
 
       Vec<3> indirect{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
                       attenuation[2] * bounced[2]};
