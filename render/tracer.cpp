@@ -31,7 +31,76 @@ struct BsdfSample {
   Vec<3> attenuation{1.0, 1.0, 1.0};
   double pdf = 1.0;
   bool valid = false;
+  bool is_delta = false;
 };
+
+struct OrthonormalBasis {
+  Vec<3> u;
+  Vec<3> v;
+  Vec<3> w;
+};
+
+OrthonormalBasis build_orthonormal_basis(const Vec<3> &n) {
+  OrthonormalBasis basis;
+  basis.w = n.normalized();
+
+  Vec<3> a = (std::abs(basis.w[0]) > 0.9) ? Vec<3>{0.0, 1.0, 0.0}
+                                          : Vec<3>{1.0, 0.0, 0.0};
+
+  basis.v = basis.w.cross(a).normalized();
+  basis.u = basis.v.cross(basis.w);
+
+  return basis;
+}
+
+Vec<3> local_to_world(const OrthonormalBasis &basis, const Vec<3> &local_dir) {
+  return basis.u * local_dir[0] + basis.v * local_dir[1] +
+         basis.w * local_dir[2];
+}
+
+double power_heuristic(double pdf_a, double pdf_b) {
+  double a2 = pdf_a * pdf_a;
+  double b2 = pdf_b * pdf_b;
+  if (a2 + b2 <= 0.0) {
+    return 0.0;
+  }
+  return a2 / (a2 + b2);
+}
+
+Vec<3> random_cosine_direction() {
+  double r1 = random_double();
+  double r2 = random_double();
+
+  double phi = 2.0 * PI * r1;
+  double x = std::cos(phi) * std::sqrt(r2);
+  double y = std::sin(phi) * std::sqrt(r2);
+  double z = std::sqrt(1.0 - r2);
+
+  return Vec<3>{x, y, z};
+}
+
+double estimate_emissive_light_pdf(const Scene &scene,
+                                   const HitRecord &light_hit) {
+  for (const auto &light : scene.lights) {
+    Vec<3> delta = light_hit.point - light.position;
+    double dist2 = delta * delta;
+    double radius2 = light.radius * light.radius;
+
+    if (std::abs(dist2 - radius2) < 1e-3) {
+      double area = 4.0 * PI * light.radius * light.radius;
+      if (area > 0.0) {
+        return 1.0 / area;
+      }
+    }
+  }
+
+  return 0.0;
+}
+
+double evaluate_lambertian_pdf(const Vec<3> &normal, const Vec<3> &wi) {
+  double cos_theta = std::max(normal * wi, 0.0);
+  return cos_theta / PI;
+}
 
 double estimate_mip_level_f(const TextureMipChain &chain,
                             const HitRecord &rec) {
@@ -235,17 +304,24 @@ BsdfSample scatter_lambertian(const HitRecord &rec,
 
   BsdfSample bsdf;
   MaterialSample sample = evaluate_material_sample(rec);
-  Vec<3> scatter_dir = sample.shading_normal + random_unit_vector();
 
-  if (scatter_dir * scatter_dir < 1e-8) {
-    scatter_dir = sample.shading_normal;
+  OrthonormalBasis basis = build_orthonormal_basis(sample.shading_normal);
+  Vec<3> local_dir = random_cosine_direction();
+  Vec<3> scatter_dir = local_to_world(basis, local_dir).normalized();
+
+  double cos_theta = std::max(sample.shading_normal * scatter_dir, 0.0);
+  bsdf.pdf = cos_theta / PI;
+
+  if (bsdf.pdf <= 0.0) {
+    bsdf.valid = false;
+    return bsdf; // PDF 为零或负数，丢弃
   }
 
   bsdf.scattered =
       Ray(rec.point + sample.shading_normal * config.ray_epsilon, scatter_dir);
   bsdf.attenuation = sample.base_color;
-  bsdf.pdf = 1.0;
   bsdf.valid = true;
+  bsdf.is_delta = false;
   return bsdf;
 }
 
@@ -270,6 +346,7 @@ BsdfSample scatter_metal(const HitRecord &rec, const Ray &incoming,
   bsdf.attenuation = sample.base_color;
   bsdf.pdf = 1.0;
   bsdf.valid = true;
+  bsdf.is_delta = true;
   return bsdf;
 }
 
@@ -302,6 +379,7 @@ BsdfSample scatter_dielectric(const HitRecord &rec, const Ray &incoming,
   bsdf.scattered = Ray(rec.point + direction * config.ray_epsilon, direction);
   bsdf.pdf = 1.0;
   bsdf.valid = true;
+  bsdf.is_delta = true;
   return bsdf;
 }
 
@@ -412,10 +490,23 @@ Vec<3> evaluate_emissive_direct_lighting(const Scene &scene,
     Vec<3> emission = evaluate_emission(shadow_rec);
 
     double geometry = (n_dot_l * light_cos) / std::max(dist2, 1e-6);
+
+    double light_pdf = light_sample.pdf;
+
+    double bsdf_pdf = evaluate_lambertian_pdf(sample.shading_normal, light_dir);
+
+    if (bsdf_pdf <= 0.0) {
+      continue;
+    }
+    if (light_pdf <= 0.0) {
+      continue;
+    }
+    double mis_weight = power_heuristic(light_pdf, bsdf_pdf);
+
     result += Vec<3>{sample.base_color[0] * emission[0],
                      sample.base_color[1] * emission[1],
                      sample.base_color[2] * emission[2]} *
-              (geometry / light_sample.pdf);
+              (geometry / light_pdf) * mis_weight;
   }
   return result;
 }
@@ -431,10 +522,49 @@ Vec<3> evaluate_direct_lighting(const Scene &scene, const HitRecord &rec,
   return direct;
 }
 
+Vec<3> evaluate_emissive_hit_radiance(const Scene &scene, const HitRecord &rec,
+                                      const Ray &incoming,
+                                      bool from_delta_bounce,
+                                      bool is_primary_ray,
+                                      const Vec<3> &prev_shading_normal) {
+
+  Vec<3> emission = evaluate_emission(rec);
+
+  if (is_primary_ray || from_delta_bounce) {
+    return emission;
+  }
+
+  if (!rec.material) {
+    return emission;
+  }
+
+  double light_pdf = estimate_emissive_light_pdf(scene, rec);
+
+  if (light_pdf <= 0.0) {
+    return emission;
+  }
+
+  Vec<3> wi = (incoming.direction).normalized();
+  if (prev_shading_normal * prev_shading_normal < 1e-12) {
+    return emission;
+  }
+
+  double bsdf_pdf = evaluate_lambertian_pdf(prev_shading_normal, wi);
+
+  if (bsdf_pdf <= 0.0) {
+    return Vec<3>{0.0, 0.0, 0.0};
+  }
+
+  double mis_weight = power_heuristic(light_pdf, bsdf_pdf);
+  return emission * mis_weight;
+}
+
 } // namespace
 
 Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
-                 const DirectionalLight &light, const TracerConfig &config) {
+                 const DirectionalLight &light, const TracerConfig &config,
+                 bool from_delta_bounce, bool is_primary_ray,
+                 const Vec<3> &prev_shading_normal) {
 
   if (depth <= 0) {
     return Vec<3>{0.0, 0.0, 0.0}; // 超过递归深度，返回黑色
@@ -443,10 +573,10 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
   if (scene.hit(ray, 0.001, std::numeric_limits<double>::max(), rec)) {
 
     if (is_emissive(rec)) {
-      return evaluate_emission(rec); // 如果是自发光材质，直接返回发光颜色
+      return evaluate_emissive_hit_radiance(
+          scene, rec, ray, from_delta_bounce, is_primary_ray,
+          prev_shading_normal); // 如果击中的是发光物体，直接返回其辐射度
     }
-    Ray scattered{{0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
-    Vec<3> attenuation{1.0, 1.0, 1.0};
     Vec<3> direct{0.0, 0.0, 0.0};
     if (config.enable_direct_lighting) {
       direct = evaluate_direct_lighting(scene, rec, light, config);
@@ -459,19 +589,35 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
       // 技术随机终止路径，以减少计算量 无偏估计
       if (depth <= config.max_depth - config.rr_start_depth) {
         double survive_prob =
-            std::max(attenuation[0], std::max(attenuation[1], attenuation[2]));
+            std::max(bsdf.attenuation[0],
+                     std::max(bsdf.attenuation[1], bsdf.attenuation[2]));
         survive_prob = std::clamp(survive_prob, 0.10, 0.95);
 
         if (random_double() > survive_prob) {
           return Vec<3>{0.0, 0.0, 0.0}; // Russian Roulette 终止路径
         }
 
-        attenuation = attenuation / survive_prob; // 反向补偿
+        bsdf.attenuation = bsdf.attenuation / survive_prob; // 反向补偿
       }
-      Vec<3> bounced = trace_ray(scattered, scene, depth - 1, light, config);
+      Vec<3> outgoing_normal = rec.normal;
+      if (rec.material && rec.material->type == MaterialType::Lambertian) {
+        outgoing_normal = evaluate_material_sample(rec).shading_normal;
+      }
+      Vec<3> bounced = trace_ray(bsdf.scattered, scene, depth - 1, light,
+                                 config, bsdf.is_delta, false, outgoing_normal);
 
-      Vec<3> indirect{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
-                      attenuation[2] * bounced[2]};
+      double bsdf_pdf = bsdf.pdf;
+      if (bsdf_pdf <= 0.0) {
+        return direct; // PDF 为零或负数，丢弃间接光贡献
+      }
+
+      Vec<3> indirect{bsdf.attenuation[0] * bounced[0],
+                      bsdf.attenuation[1] * bounced[1],
+                      bsdf.attenuation[2] * bounced[2]};
+
+      if (!bsdf.is_delta && bsdf_pdf > 1e-8) {
+        indirect = indirect / bsdf_pdf; // 反向补偿 PDF
+      }
 
       return indirect + direct;
     }
