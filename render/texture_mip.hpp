@@ -3,6 +3,7 @@
 #include "../Vector.hh"
 #include "../tgaimage.h"
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 struct TextureMipChain {
@@ -75,4 +76,34 @@ inline TGAColor sample_mip_nearest(const TextureMipChain &chain,
   int y =
       std::clamp(static_cast<int>(uv[1] * img.height()), 0, img.height() - 1);
   return img.get(x, y);
+}
+
+inline TGAColor sample_mip_bilinear(const TextureMipChain &chain,
+                                    const Vec<2> &uv, int level) {
+
+  const TGAImage &img = chain.get_level(level);
+  double x = uv[0] * (img.width() - 1);
+  double y = uv[1] * (img.height() - 1);
+
+  int x0 = static_cast<int>(std::floor(x));
+  int y0 = static_cast<int>(std::floor(y));
+  int x1 = std::min(x0 + 1, img.width() - 1);
+  int y1 = std::min(y0 + 1, img.height() - 1);
+
+  double tx = x - x0;
+  double ty = y - y0;
+
+  TGAColor c00 = img.get(x0, y0);
+  TGAColor c10 = img.get(x1, y0);
+  TGAColor c01 = img.get(x0, y1);
+  TGAColor c11 = img.get(x1, y1);
+
+  TGAColor result;
+
+  for (int i = 0; i < img.get_bytespp(); i++) {
+    double c0 = (1 - tx) * c00[i] + tx * c10[i];
+    double c1 = (1 - tx) * c01[i] + tx * c11[i];
+    result[i] = static_cast<unsigned char>((1 - ty) * c0 + ty * c1);
+  }
+  return result;
 }

@@ -1,11 +1,19 @@
 #include "tracer.hpp"
 #include "hit_record.hpp"
+#include "light.hpp"
 #include "material.hpp"
 #include "texture_mip.hpp"
+#include "tracer_config.hpp"
 #include "utils/render_util.hpp"
 #include <algorithm>
 
 namespace {
+
+struct MaterialSample {
+  Vec<3> albedo;
+  Vec<3> shading_normal;
+  double roughness;
+};
 
 Vec<3> evaluate_shading_normal(const HitRecord &rec) {
   if (!rec.material) {
@@ -16,13 +24,14 @@ Vec<3> evaluate_shading_normal(const HitRecord &rec) {
 
     Vec<4> sampled = rec.material->normal_texture->get_normal(rec.uv);
 
-    Vec<3> tangent{sampled[0], sampled[1], sampled[2]};
+    Vec<3> tangent_normal{sampled[0], sampled[1], sampled[2]};
 
-    tangent = tangent.normalized();
+    tangent_normal = tangent_normal.normalized();
 
-    Vec<3> world_normal = (rec.tangent * tangent[0] +
-                           rec.bitangent * tangent[1] + rec.normal * tangent[2])
-                              .normalized();
+    Vec<3> world_normal =
+        (rec.tangent * tangent_normal[0] + rec.bitangent * tangent_normal[1] +
+         rec.normal * tangent_normal[2])
+            .normalized();
     return world_normal;
   }
 
@@ -38,8 +47,7 @@ double evaluate_roughness(const HitRecord &rec) {
 
   if (rec.material->use_specular_texture && rec.material->specular_texture) {
     double spec = rec.material->specular_texture->specular(rec.uv);
-    roughness =
-        1.0 - std::clamp(spec / 255.0, 0.0, 1.0); // 将贴图值转换为粗糙度
+    roughness = 1.0 - std::clamp(spec, 0.0, 1.0); // 将贴图值转换为粗糙度
   }
   return std::clamp(roughness, 0.0, 1.0);
 }
@@ -49,7 +57,7 @@ Vec<3> evaluate_albedo(const HitRecord &rec) {
     return Vec<3>{1.0, 1.0, 1.0};
   }
   if (rec.material->mip_chain && !rec.material->mip_chain->empty()) {
-    TGAColor tex = sample_mip_nearest(*rec.material->mip_chain, rec.uv, 0);
+    TGAColor tex = sample_mip_bilinear(*rec.material->mip_chain, rec.uv, 0);
 
     return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
   }
@@ -62,6 +70,14 @@ Vec<3> evaluate_albedo(const HitRecord &rec) {
   return rec.material->albedo;
 }
 
+MaterialSample evaluate_material_sample(const HitRecord &rec) {
+  MaterialSample sample;
+  sample.albedo = evaluate_albedo(rec);
+  sample.shading_normal = evaluate_shading_normal(rec);
+  sample.roughness = evaluate_roughness(rec);
+  return sample;
+}
+
 bool is_in_shadow(const Scene &scene, const Vec<3> &point, const Vec<3> &normal,
                   const Vec<3> &light_dir, const TracerConfig &config) {
   Ray shadow_ray(point + normal * config.ray_epsilon, light_dir);
@@ -70,27 +86,28 @@ bool is_in_shadow(const Scene &scene, const Vec<3> &point, const Vec<3> &normal,
                    temp_rec);
 }
 
-Vec<3> evaluating_direct_lighting(const Scene &scene, const HitRecord &rec,
-                                  const DirectionalLight &light,
-                                  const TracerConfig &config) {
+Vec<3> evaluating_directional_direct_lighting(const Scene &scene,
+                                              const HitRecord &rec,
+                                              const DirectionalLight &light,
+                                              const TracerConfig &config) {
 
   if (!rec.material || rec.material->type != MaterialType::Lambertian) {
     return Vec<3>{0.0, 0.0, 0.0};
   }
   Vec<3> light_dir = (-light.direction).normalized();
 
-  Vec<3> shading_normal = evaluate_shading_normal(rec);
+  MaterialSample sample = evaluate_material_sample(rec);
 
-  if (is_in_shadow(scene, rec.point, shading_normal, light_dir, config)) {
+  if (is_in_shadow(scene, rec.point, sample.shading_normal, light_dir,
+                   config)) {
     return Vec<3>{0.0, 0.0, 0.0}; // 在阴影中，返回黑色
   }
 
-  double n_dot_l = std::max(0.0, shading_normal * light_dir);
+  double n_dot_l = std::max(0.0, sample.shading_normal * light_dir);
   if (n_dot_l <= 0.0) {
     return Vec<3>{0.0, 0.0, 0.0}; // 法线背向光源，返回黑色
   }
-
-  Vec<3> base_color = evaluate_albedo(rec);
+  Vec<3> base_color = sample.albedo;
 
   return Vec<3>{base_color[0] * light.color[0], base_color[1] * light.color[1],
                 base_color[2] * light.color[2]} *
@@ -142,31 +159,36 @@ Vec<3> reflect(const Vec<3> &v, const Vec<3> &n) {
 bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
                         Vec<3> &attenuation, const TracerConfig &config) {
 
-  Vec<3> shading_normal = evaluate_shading_normal(rec);
-  Vec<3> scatter_dir = shading_normal + random_unit_vector();
+  MaterialSample sample = evaluate_material_sample(rec);
+  Vec<3> scatter_dir = sample.shading_normal + random_unit_vector();
 
   if (scatter_dir * scatter_dir < 1e-8) {
-    scatter_dir = shading_normal;
+    scatter_dir = sample.shading_normal;
   }
 
-  scattered = Ray(rec.point + shading_normal * config.ray_epsilon, scatter_dir);
-  attenuation = evaluate_albedo(rec);
+  scattered =
+      Ray(rec.point + sample.shading_normal * config.ray_epsilon, scatter_dir);
+  attenuation = sample.albedo;
   return true;
 }
 
 bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
                    Vec<3> &attenuation, const TracerConfig &config) {
-  Vec<3> reflected = reflect(incoming.direction.normalized(), rec.normal);
-  double fuzz = evaluate_roughness(rec);
+
+  MaterialSample sample = evaluate_material_sample(rec);
+  Vec<3> reflected =
+      reflect(incoming.direction.normalized(), sample.shading_normal);
+  double fuzz = sample.roughness;
 
   Vec<3> scattered_dir = reflected + random_in_unit_sphere() * fuzz;
 
-  if (scattered_dir * rec.normal <= 0) {
+  if (scattered_dir * sample.shading_normal <= 0) {
     return false; // 散射方向与法线相反，丢弃
   }
 
-  scattered = Ray(rec.point + rec.normal * config.ray_epsilon, scattered_dir);
-  attenuation = evaluate_albedo(rec);
+  scattered = Ray(rec.point + sample.shading_normal * config.ray_epsilon,
+                  scattered_dir);
+  attenuation = sample.albedo;
   return true;
 }
 
@@ -221,21 +243,98 @@ bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
   return false;
 }
 
+bool is_emissive(const HitRecord &rec) {
+  if (!rec.material) {
+    return false;
+  }
+  const Vec<3> &e = rec.material->emission;
+  return e[0] > 0.0 || e[1] > 0.0 || e[2] > 0.0;
+}
+
+Vec<3> evaluate_emission(const HitRecord &rec) {
+  if (!rec.material) {
+    return Vec<3>{0.0, 0.0, 0.0};
+  }
+  return rec.material->emission;
+}
+
+Vec<3> evaluate_emissive_direct_lighting(const Scene &scene,
+                                         const HitRecord &rec,
+                                         const Sphere &light_sphere,
+                                         const TracerConfig &config) {
+
+  if (!rec.material || rec.material->type != MaterialType::Lambertian) {
+    return Vec<3>{0.0, 0.0, 0.0};
+  }
+
+  if (!light_sphere.material) {
+    return Vec<3>{0.0, 0.0, 0.0};
+  }
+
+  Vec<3> sample = evaluate_albedo(rec);
+  Vec<3> shading_normal = evaluate_shading_normal(rec);
+
+  Vec<3> to_light = light_sphere.center - rec.point;
+  double dist2 = to_light * to_light;
+
+  Vec<3> light_dir = to_light.normalized();
+
+  double n_dot_l = std::max(shading_normal * light_dir, 0.0);
+
+  if (n_dot_l <= 0.0) {
+    return Vec<3>{0.0, 0.0, 0.0};
+  }
+  Ray shadow_ray(rec.point + shading_normal * config.ray_epsilon, light_dir);
+  HitRecord shadow_rec;
+  if (!scene.hit(shadow_ray, config.ray_epsilon,
+                 std::sqrt(dist2) - config.ray_epsilon, shadow_rec)) {
+    return Vec<3>{0.0, 0.0, 0.0};
+  }
+
+  if (!is_emissive(shadow_rec)) {
+    return Vec<3>{0.0, 0.0, 0.0};
+  }
+
+  Vec<3> emission = evaluate_emission(shadow_rec);
+  return Vec<3>{sample[0] * emission[0], sample[1] * emission[1],
+                sample[2] * emission[2]} *
+         (n_dot_l / std::max(dist2, 1e-6));
+}
+
+Vec<3> evaluate_direct_lighting(const Scene &scene, const HitRecord &rec,
+                                const DirectionalLight &light,
+                                const Sphere &emissive_light,
+                                const TracerConfig &config) {
+
+  Vec<3> direct{0.0, 0.0, 0.0};
+  direct += evaluating_directional_direct_lighting(scene, rec, light, config);
+  direct +=
+      evaluate_emissive_direct_lighting(scene, rec, emissive_light, config);
+
+  return direct;
+}
+
 } // namespace
 
 Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
-                 const DirectionalLight &light, const TracerConfig &config) {
+                 const DirectionalLight &light, const Sphere &emissive_light,
+                 const TracerConfig &config) {
 
   if (depth <= 0) {
     return Vec<3>{0.0, 0.0, 0.0}; // 超过递归深度，返回黑色
   }
   HitRecord rec;
   if (scene.hit(ray, 0.001, std::numeric_limits<double>::max(), rec)) {
+
+    if (is_emissive(rec)) {
+      return evaluate_emission(rec); // 如果是自发光材质，直接返回发光颜色
+    }
     Ray scattered{{0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
     Vec<3> attenuation{1.0, 1.0, 1.0};
     Vec<3> direct{0.0, 0.0, 0.0};
     if (config.enable_direct_lighting) {
-      direct = evaluating_direct_lighting(scene, rec, light, config);
+      direct =
+          evaluate_direct_lighting(scene, rec, light, emissive_light, config);
     }
 
     if (scatter_material(ray, rec, scattered, attenuation, config)) {
@@ -252,7 +351,8 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
 
         attenuation = attenuation / survive_prob; // 反向补偿
       }
-      Vec<3> bounced = trace_ray(scattered, scene, depth - 1, light, config);
+      Vec<3> bounced =
+          trace_ray(scattered, scene, depth - 1, light, emissive_light, config);
 
       Vec<3> indirect{attenuation[0] * bounced[0], attenuation[1] * bounced[1],
                       attenuation[2] * bounced[2]};

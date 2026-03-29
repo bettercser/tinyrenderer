@@ -15,6 +15,7 @@ struct Material {
 
   MaterialType type = MaterialType::Lambertian;
   Vec<3> albedo{1.0, 1.0, 1.0};
+  Vec<3> emission{0.0, 0.0, 0.0}; // 自发光颜色
 
   double metallic = 0.0;                  // 金属度
   double roughness = 0.5;                 // 粗糙度

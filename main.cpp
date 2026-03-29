@@ -309,6 +309,17 @@ int main(int argc, char **argv) {
   mesh_mat.specular_texture = &mesh_model;
   mesh_mat.use_specular_texture = true;
 
+  Material light_mat;
+  light_mat.type = MaterialType::Lambertian;
+  light_mat.emission = Vec<3>{1.8, 1.2, 0.7};
+
+  Sphere light_sphere;
+  light_sphere.center = Vec<3>{0.0, 1.4, -2.6};
+  light_sphere.radius = 0.8;
+  light_sphere.material = &light_mat;
+
+  scene.objects.push_back(std::make_shared<Sphere>(light_sphere));
+
   TextureMipChain mesh_diffuse_mips =
       build_mip_chain(*mesh_model.diffuse_image());
   mesh_mat.mip_chain = &mesh_diffuse_mips;
@@ -365,7 +376,7 @@ int main(int argc, char **argv) {
 
             Ray ray = ray_camera.generate_ray(uv[0], uv[1]);
             accumulated_color += trace_ray(ray, scene, tracer_config.max_depth,
-                                           light, tracer_config);
+                                           light, light_sphere, tracer_config);
           }
         }
 

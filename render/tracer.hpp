@@ -2,8 +2,10 @@
 
 #include "../Vector.hh"
 #include "../scene/scene.hpp"
+#include "../scene/sphere.hpp"
 #include "light.hpp"
 #include "tracer_config.hpp"
 
 Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
-                 const DirectionalLight &light, const TracerConfig &config);
+                 const DirectionalLight &light, const Sphere &emissive_light,
+                 const TracerConfig &config);
