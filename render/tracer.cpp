@@ -22,6 +22,15 @@ struct SphereLightSample {
   Vec<3> point;
   Vec<3> normal;
   double pdf = 0.0;
+  Vec<3> direction;
+  double distance = 0.0;
+};
+
+struct BsdfSample {
+  Ray scattered{{0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
+  Vec<3> attenuation{1.0, 1.0, 1.0};
+  double pdf = 1.0;
+  bool valid = false;
 };
 
 double estimate_mip_level_f(const TextureMipChain &chain,
@@ -221,9 +230,10 @@ Vec<3> random_unit_vector() { return random_in_unit_sphere().normalized(); }
 Vec<3> reflect(const Vec<3> &v, const Vec<3> &n) {
   return v - n * (2.0 * (v * n));
 }
-bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
-                        Vec<3> &attenuation, const TracerConfig &config) {
+BsdfSample scatter_lambertian(const HitRecord &rec,
+                              const TracerConfig &config) {
 
+  BsdfSample bsdf;
   MaterialSample sample = evaluate_material_sample(rec);
   Vec<3> scatter_dir = sample.shading_normal + random_unit_vector();
 
@@ -231,15 +241,18 @@ bool scatter_lambertian(const HitRecord &rec, Ray &scattered,
     scatter_dir = sample.shading_normal;
   }
 
-  scattered =
+  bsdf.scattered =
       Ray(rec.point + sample.shading_normal * config.ray_epsilon, scatter_dir);
-  attenuation = sample.base_color;
-  return true;
+  bsdf.attenuation = sample.base_color;
+  bsdf.pdf = 1.0;
+  bsdf.valid = true;
+  return bsdf;
 }
 
-bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
-                   Vec<3> &attenuation, const TracerConfig &config) {
+BsdfSample scatter_metal(const HitRecord &rec, const Ray &incoming,
+                         const TracerConfig &config) {
 
+  BsdfSample bsdf;
   MaterialSample sample = evaluate_material_sample(rec);
   Vec<3> reflected =
       reflect(incoming.direction.normalized(), sample.shading_normal);
@@ -248,19 +261,23 @@ bool scatter_metal(const HitRecord &rec, const Ray &incoming, Ray &scattered,
   Vec<3> scattered_dir = reflected + random_in_unit_sphere() * fuzz;
 
   if (scattered_dir * sample.shading_normal <= 0) {
-    return false; // 散射方向与法线相反，丢弃
+    bsdf.valid = false;
+    return bsdf; // 散射方向与法线相反，丢弃
   }
 
-  scattered = Ray(rec.point + sample.shading_normal * config.ray_epsilon,
-                  scattered_dir);
-  attenuation = sample.base_color;
-  return true;
+  bsdf.scattered = Ray(rec.point + sample.shading_normal * config.ray_epsilon,
+                       scattered_dir);
+  bsdf.attenuation = sample.base_color;
+  bsdf.pdf = 1.0;
+  bsdf.valid = true;
+  return bsdf;
 }
 
-bool scatter_dielectric(const HitRecord &rec, const Ray &incoming,
-                        Ray &scattered, Vec<3> &attenuation,
-                        const TracerConfig &config) {
-  attenuation =
+BsdfSample scatter_dielectric(const HitRecord &rec, const Ray &incoming,
+                              const TracerConfig &config) {
+
+  BsdfSample bsdf;
+  bsdf.attenuation =
       rec.material ? rec.material->transmission_color : Vec<3>{1.0, 1.0, 1.0};
 
   double refraction_ratio =
@@ -282,39 +299,50 @@ bool scatter_dielectric(const HitRecord &rec, const Ray &incoming,
     direction = refract(unit_dir, rec.normal, refraction_ratio);
   }
 
-  scattered = Ray(rec.point + direction * config.ray_epsilon, direction);
-  return true;
+  bsdf.scattered = Ray(rec.point + direction * config.ray_epsilon, direction);
+  bsdf.pdf = 1.0;
+  bsdf.valid = true;
+  return bsdf;
 }
 
-bool scatter_material(const Ray &incoming, const HitRecord &rec, Ray &scattered,
-                      Vec<3> &attenuation, const TracerConfig &config) {
+BsdfSample scatter_material(const Ray &incoming, const HitRecord &rec,
+                            const TracerConfig &config) {
 
+  BsdfSample bsdf;
   if (!rec.material) {
-    attenuation = Vec<3>{1.0, 1.0, 1.0};
-    scattered = Ray(rec.point + rec.normal * config.ray_epsilon, rec.normal);
-    return true;
+    bsdf.attenuation = Vec<3>{1.0, 1.0, 1.0};
+    bsdf.scattered =
+        Ray(rec.point + rec.normal * config.ray_epsilon, rec.normal);
+    bsdf.valid = true;
+    bsdf.pdf = 1.0;
+    return bsdf;
   }
 
   switch (rec.material->type) {
 
   case MaterialType::Lambertian:
-    return scatter_lambertian(rec, scattered, attenuation, config);
+    return scatter_lambertian(rec, config);
 
   case MaterialType::Metal:
-    return scatter_metal(rec, incoming, scattered, attenuation, config);
+    return scatter_metal(rec, incoming, config);
   case MaterialType::Dielectric:
-    return scatter_dielectric(rec, incoming, scattered, attenuation, config);
+    return scatter_dielectric(rec, incoming, config);
   }
 
-  return false;
+  return bsdf;
 }
 
-SphereLightSample sample_sphere_light(const LightRecord &light) {
+SphereLightSample sample_sphere_light(const LightRecord &light,
+                                      const Vec<3> &shading_point) {
   Vec<3> dir = random_unit_vector();
 
   SphereLightSample sample;
   sample.point = light.position + dir * light.radius;
   sample.normal = dir.normalized();
+
+  Vec<3> to_light = sample.point - shading_point;
+  sample.distance = norm(to_light);
+  sample.direction = to_light / sample.distance;
 
   double area = 4.0 * PI * light.radius * light.radius;
   sample.pdf = area > 0.0 ? 1.0 / area : 0.0;
@@ -349,11 +377,14 @@ Vec<3> evaluate_emissive_direct_lighting(const Scene &scene,
 
   for (const auto &light : scene.lights) {
 
-    SphereLightSample light_sample = sample_sphere_light(light);
-    Vec<3> to_light = light_sample.point - rec.point;
-    double dist2 = to_light * to_light;
+    SphereLightSample light_sample = sample_sphere_light(light, rec.point);
 
-    Vec<3> light_dir = to_light.normalized();
+    if (light_sample.pdf <= 0.0) {
+      continue;
+    }
+    double dist2 = light_sample.distance * light_sample.distance;
+
+    Vec<3> light_dir = light_sample.direction;
 
     double n_dot_l = std::max(sample.shading_normal * light_dir, 0.0);
 
@@ -421,7 +452,9 @@ Vec<3> trace_ray(const Ray &ray, const Scene &scene, int depth,
       direct = evaluate_direct_lighting(scene, rec, light, config);
     }
 
-    if (scatter_material(ray, rec, scattered, attenuation, config)) {
+    BsdfSample bsdf = scatter_material(ray, rec, config);
+
+    if (bsdf.valid) {
       // 在达到一定深度后，使用 Russian Roulette
       // 技术随机终止路径，以减少计算量 无偏估计
       if (depth <= config.max_depth - config.rr_start_depth) {
