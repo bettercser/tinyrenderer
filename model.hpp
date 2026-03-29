@@ -75,4 +75,6 @@ public:
     return c;
   }
   const TGAImage *diffuse_image() const { return diffuse_map.get(); }
+  const TGAImage *normal_image() const { return normal_map.get(); }
+  const TGAImage *specular_image() const { return specular_map.get(); }
 };

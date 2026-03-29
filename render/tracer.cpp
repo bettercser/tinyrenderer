@@ -23,25 +23,6 @@ struct SphereLightSample {
   Vec<3> normal;
   double pdf = 0.0;
 };
-int estimate_mip_level(const TextureMipChain &chain, const HitRecord &rec) {
-  if (chain.empty()) {
-    return 0;
-  }
-
-  double d = rec.view_distance;
-
-  int level = 0;
-  if (d > 2.0)
-    level = 1;
-  if (d > 4.0)
-    level = 2;
-  if (d > 8.0)
-    level = 3;
-  if (d > 16.0)
-    level = 4;
-
-  return std::clamp(level, 0, chain.levels() - 1);
-}
 
 double estimate_mip_level_f(const TextureMipChain &chain,
                             const HitRecord &rec) {
@@ -60,10 +41,10 @@ double estimate_mip_level_f(const TextureMipChain &chain,
 }
 
 Vec<3> sample_diffuse_texture(const Material &material, const HitRecord &rec) {
-  if (material.mip_chain && !material.mip_chain->empty()) {
+  if (material.diffuse_mips && !material.diffuse_mips->empty()) {
     TGAColor tex =
-        sample_mip_trilinear(*material.mip_chain, rec.uv,
-                             estimate_mip_level_f(*material.mip_chain, rec));
+        sample_mip_trilinear(*material.diffuse_mips, rec.uv,
+                             estimate_mip_level_f(*material.diffuse_mips, rec));
 
     return Vec<3>{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
   }
@@ -76,18 +57,37 @@ Vec<3> sample_diffuse_texture(const Material &material, const HitRecord &rec) {
   return material.base_color;
 }
 
-Vec<3> sample_normal_texture(const Material &material, const Vec<2> &uv) {
+Vec<3> sample_normal_texture(const Material &material, const HitRecord &rec) {
+
+  if (material.normal_mips && !material.normal_mips->empty()) {
+    TGAColor tex =
+        sample_mip_trilinear(*material.normal_mips, rec.uv,
+                             estimate_mip_level_f(*material.normal_mips, rec));
+
+    Vec<3> tangent_normal{tex[2] / 255.0, tex[1] / 255.0, tex[0] / 255.0};
+    tangent_normal = tangent_normal * 2.0 - Vec<3>{1.0, 1.0, 1.0};
+    return tangent_normal;
+  }
   if (material.use_normal_texture && material.normal_texture) {
-    Vec<4> sampled = material.normal_texture->get_normal(uv);
+    Vec<4> sampled = material.normal_texture->get_normal(rec.uv);
     return Vec<3>{sampled[0], sampled[1], sampled[2]};
   }
 
   return Vec<3>{0.0, 0.0, 1.0};
 }
 
-double sample_specular_texture(const Material &material, const Vec<2> &uv) {
+double sample_specular_texture(const Material &material, const HitRecord &rec) {
+
+  if (material.specular_mips && !material.specular_mips->empty()) {
+    TGAColor tex = sample_mip_trilinear(
+        *material.specular_mips, rec.uv,
+        estimate_mip_level_f(*material.specular_mips, rec));
+
+    return tex[0] / 255.0; // 假设镜面反射强度存储在红色通道
+  }
+
   if (material.use_specular_texture && material.specular_texture) {
-    return material.specular_texture->specular(uv);
+    return material.specular_texture->specular(rec.uv);
   }
 
   return 1.0 - material.roughness;
@@ -101,8 +101,8 @@ double evaluate_roughness(const HitRecord &rec) {
   double roughness = rec.material->roughness;
 
   double spec =
-      sample_specular_texture(*rec.material, rec.uv); // 从贴图获取镜面反射值
-  roughness = 1.0 - std::clamp(spec, 0.0, 1.0);       // 将贴图值转换为粗糙度
+      sample_specular_texture(*rec.material, rec); // 从贴图获取镜面反射值
+  roughness = 1.0 - std::clamp(spec, 0.0, 1.0);    // 将贴图值转换为粗糙度
   return std::clamp(roughness, 0.0, 1.0);
 }
 
@@ -113,7 +113,7 @@ Vec<3> evaluate_shading_normal(const HitRecord &rec) {
 
   if (rec.material->use_normal_texture && rec.material->normal_texture) {
 
-    Vec<3> tangent_normal = sample_normal_texture(*rec.material, rec.uv);
+    Vec<3> tangent_normal = sample_normal_texture(*rec.material, rec);
     tangent_normal = tangent_normal.normalized();
 
     Vec<3> world_normal =

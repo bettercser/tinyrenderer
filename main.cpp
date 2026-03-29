@@ -331,7 +331,14 @@ int main(int argc, char **argv) {
 
   TextureMipChain mesh_diffuse_mips =
       build_mip_chain(*mesh_model.diffuse_image());
-  mesh_mat.mip_chain = &mesh_diffuse_mips;
+  TextureMipChain mesh_normal_mips =
+      build_mip_chain(*mesh_model.normal_image());
+  TextureMipChain mesh_specular_mips =
+      build_mip_chain(*mesh_model.specular_image());
+
+  mesh_mat.diffuse_mips = &mesh_diffuse_mips;
+  mesh_mat.normal_mips = &mesh_normal_mips;
+  mesh_mat.specular_mips = &mesh_specular_mips;
 
   auto mesh_objects =
       build_triangle_primitives_from_model(mesh_model, &mesh_mat);

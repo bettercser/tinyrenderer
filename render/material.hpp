@@ -27,7 +27,9 @@ struct Material {
   const Model *normal_texture = nullptr; // 法线贴图
   bool use_normal_texture = false;       // 是否使用法线贴图
 
-  const Model *specular_texture = nullptr;    // 镜面反射贴图
-  bool use_specular_texture = false;          // 是否使用镜面反射贴图
-  const TextureMipChain *mip_chain = nullptr; // 纹理MIP链
+  const Model *specular_texture = nullptr;        // 镜面反射贴图
+  bool use_specular_texture = false;              // 是否使用镜面反射贴图
+  const TextureMipChain *diffuse_mips = nullptr;  // 纹理MIP链
+  const TextureMipChain *normal_mips = nullptr;   // 法线贴图MIP链
+  const TextureMipChain *specular_mips = nullptr; // 镜面反射贴图MIP链
 };
